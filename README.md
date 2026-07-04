@@ -10,8 +10,8 @@ stop hand-rolling sockets, cache glue, dedup, backpressure, and reconnect logic.
 
 ## Packages
 
-| Package | Description |
-| --- | --- |
+| Package          | Description                                                                |
+| ---------------- | -------------------------------------------------------------------------- |
 | `@liveflux/core` | Framework-agnostic engine (connection, subscriptions, store, backpressure) |
 
 ## Development
