@@ -17,7 +17,8 @@
     "build": "pnpm -r build",
     "test": "vitest run",
     "typecheck": "pnpm -r typecheck",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "ship": "bash scripts/ship.sh"
   },
   "devDependencies": {
     "prettier": "^3.4.0",
