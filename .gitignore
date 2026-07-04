@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+*.log
+.DS_Store
+.turbo/
+.idea/
+.vscode/
+
+Dev.md
+SPEC.md
