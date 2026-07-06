@@ -12,7 +12,11 @@
  * The context layer (public entry point)
  */
 export { LivefluxClient } from './client/liveflux-client';
-export type { LivefluxClientOptions } from './client/liveflux-client';
+export type {
+  LivefluxClientOptions,
+  SubscribeConfig,
+  Subscription,
+} from './client/liveflux-client';
 
 /**
  * Contracts (implemented by adapter authors, consumed by bindings)
@@ -26,7 +30,6 @@ export type {
   SubscribeRequest,
   StreamAdapter,
 } from './types';
-export type { EventListener } from './internal/subscriptions/subscription-registry';
 
 /**
  * Public configuration
