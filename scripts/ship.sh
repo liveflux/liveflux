@@ -40,8 +40,11 @@ if [[ -n "${2:-}" ]]; then
 elif [[ "$CURRENT" != "$DEFAULT_BRANCH" ]]; then
   BRANCH="$CURRENT"
 else
-  TYPE="$(printf '%s' "$MSG" | sed -E 's/^([a-z]+).*/\1/')"
-  SLUG="$(printf '%s' "${MSG#*: }" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-40)"
+  # Collapse to a single line first, so an accidental newline in the message (e.g. a wrapped
+  # paste) can never produce an invalid branch name.
+  SUBJECT="$(printf '%s' "$MSG" | tr '\n' ' ')"
+  TYPE="$(printf '%s' "$SUBJECT" | sed -E 's/^([a-z]+).*/\1/')"
+  SLUG="$(printf '%s' "${SUBJECT#*: }" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-40)"
   BRANCH="${TYPE:-work}/${SLUG:-change}"
 fi
 

@@ -1,4 +1,4 @@
-import type { AdapterHandlers, ConnectionState, StreamAdapter } from './index';
+import type { AdapterHandlers, ConnectionState, NormalizedEvent, StreamAdapter } from '../../types';
 import { backoffDelay, resolveReconnectPolicy, type ReconnectPolicy } from './reconnect';
 
 /** Heartbeat keepalive policy. */
@@ -20,6 +20,8 @@ export interface ConnectionManagerOptions {
   heartbeat?: Partial<HeartbeatPolicy>;
   /** Injectable RNG for backoff jitter — deterministic in tests. Defaults to Math.random. */
   random?: () => number;
+  /** Called for every decoded event from the adapter (the client routes these to the registry). */
+  onEvent?: (event: NormalizedEvent) => void;
 }
 
 type StateListener = (state: ConnectionState, previous: ConnectionState) => void;
@@ -27,12 +29,14 @@ type StateListener = (state: ConnectionState, previous: ConnectionState) => void
 /**
  * Owns a StreamAdapter's connection lifecycle: connect/close, automatic backoff reconnection,
  * and an optional heartbeat. Transport-agnostic — it only speaks the StreamAdapter contract.
+ * Internal to the package: consumers drive it through the LivefluxClient context layer.
  */
 export class ConnectionManager {
   private readonly adapter: StreamAdapter;
   private readonly reconnect: ReconnectPolicy;
   private readonly heartbeat: HeartbeatPolicy;
   private readonly random: () => number;
+  private readonly onEvent: ((event: NormalizedEvent) => void) | undefined;
 
   private state: ConnectionState = 'idle';
   private attempts = 0; // consecutive failed reconnects
@@ -46,6 +50,7 @@ export class ConnectionManager {
     this.reconnect = resolveReconnectPolicy(opts.reconnect);
     this.heartbeat = { ...defaultHeartbeatPolicy, ...opts.heartbeat };
     this.random = opts.random ?? Math.random;
+    this.onEvent = opts.onEvent;
   }
 
   /** Current connection state. */
@@ -79,7 +84,9 @@ export class ConnectionManager {
     this.setState('closed');
   }
 
-  /** internals */
+  /**
+   * Internal implementation.
+   */
   private openAdapter(): void {
     this.setState(this.attempts > 0 ? 'reconnecting' : 'connecting');
     const handlers: AdapterHandlers = {
@@ -88,8 +95,8 @@ export class ConnectionManager {
       onError: () => {
         /* errors surface via observability later; the ensuing close drives reconnect */
       },
-      onEvent: () => {
-        /* events are routed by the SubscriptionRegistry in a later increment */
+      onEvent: (event) => {
+        this.onEvent?.(event);
       },
     };
     this.adapter.connect(handlers);
