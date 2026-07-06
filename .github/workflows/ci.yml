@@ -36,8 +36,8 @@ jobs:
       - name: Build
         run: pnpm -r build
 
-      # - name: Test
-      #   run: pnpm test          # enable once tests land (Increment 2+)
+      - name: Test
+        run: pnpm -r --if-present test
 
       # - name: Bundle-size gate
       #   run: pnpm size           # enable once there is shippable runtime (size-limit)
