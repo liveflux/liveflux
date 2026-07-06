@@ -40,31 +40,51 @@ describe('LivefluxClient', () => {
     expect(adapter.connected).toBe(true);
   });
 
-  it('routes adapter events to the matching channel subscribers only', () => {
+  it('folds channel events into subscription state (append), ignoring other channels', () => {
     const adapter = new MockAdapter();
     const client = new LivefluxClient({ adapter });
     client.connect();
 
-    const listener = vi.fn();
-    client.subscribe('trades', listener);
+    const sub = client.subscribe<number>({ channel: 'trades', into: { strategy: 'append' } });
     expect(adapter.subscribed).toEqual(['trades']);
+    expect(sub.getState()).toEqual([]);
 
-    adapter.emit('trades', { id: 1 });
-    expect(listener).toHaveBeenCalledWith({
-      channel: 'trades',
-      event: 'update',
-      payload: { id: 1 },
-    });
+    adapter.emit('trades', 1);
+    adapter.emit('trades', 2);
+    expect(sub.getState()).toEqual([1, 2]);
 
-    adapter.emit('quotes', { id: 2 }); // no subscriber on this channel
-    expect(listener).toHaveBeenCalledTimes(1);
+    adapter.emit('quotes', 9); // different channel — not folded in
+    expect(sub.getState()).toEqual([1, 2]);
+  });
+
+  it('notifies subscription listeners when new events arrive', () => {
+    const adapter = new MockAdapter();
+    const client = new LivefluxClient({ adapter });
+    client.connect();
+
+    const sub = client.subscribe<number>({ channel: 'trades', into: { strategy: 'append' } });
+    const onChange = vi.fn();
+    sub.subscribe(onChange);
+
+    adapter.emit('trades', 1);
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('sub.destroy() releases the wire subscription', () => {
+    const adapter = new MockAdapter();
+    const client = new LivefluxClient({ adapter });
+    client.connect();
+
+    const sub = client.subscribe({ channel: 'trades', into: { strategy: 'replace' } });
+    sub.destroy();
+    expect(adapter.unsubscribed).toHaveLength(1);
   });
 
   it('destroy() unsubscribes every channel and closes the connection', () => {
     const adapter = new MockAdapter();
     const client = new LivefluxClient({ adapter });
     client.connect();
-    client.subscribe('trades', () => {});
+    client.subscribe({ channel: 'trades', into: { strategy: 'append' } });
 
     client.destroy();
     expect(adapter.unsubscribed).toHaveLength(1);
