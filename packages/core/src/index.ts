@@ -48,3 +48,7 @@ export interface StreamAdapter {
   heartbeat?(): void;
   resume?(subId: string, cursor: Cursor | null): void;
 }
+
+// runtime modules
+export * from './reconnect';
+export * from './connection-manager';

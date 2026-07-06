@@ -8,5 +8,5 @@ coverage/
 .idea/
 .vscode/
 
-Dev.md
-SPEC.md
+# local-only docs (design spec, dev notes, code explanations) — never committed
+_local/
