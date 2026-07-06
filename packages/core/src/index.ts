@@ -33,3 +33,4 @@ export type { EventListener } from './internal/subscriptions/subscription-regist
  */
 export type { ReconnectPolicy } from './internal/connection/reconnect';
 export type { HeartbeatPolicy } from './internal/connection/connection-manager';
+export type { IntoStrategy } from './internal/store/store';
