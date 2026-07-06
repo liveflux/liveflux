@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AdapterHandlers, StreamAdapter } from './index';
+import type { AdapterHandlers, StreamAdapter } from '../../types';
 import { ConnectionManager } from './connection-manager';
 
 /** Minimal controllable adapter double for tests. */
