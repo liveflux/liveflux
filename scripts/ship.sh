@@ -53,8 +53,9 @@ if [[ "$CURRENT" != "$BRANCH" ]]; then
   git checkout -b "$BRANCH"
 fi
 
-step "🔍" "verify · format · typecheck · build"
-pnpm -r --if-present check
+step "🔍" "verify · format · typecheck · test · build (turbo)"
+pnpm run format
+pnpm run check
 
 step "📝" "commit → $MSG"
 git add -A

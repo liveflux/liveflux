@@ -91,4 +91,82 @@ describe('LivefluxClient', () => {
     expect(adapter.connected).toBe(false);
     expect(client.getConnectionState()).toBe('closed');
   });
+
+  describe('subscription dedup (fold-sharing)', () => {
+    it('shares one fold across identical subscriptions — folds once, reads many', () => {
+      const adapter = new MockAdapter();
+      const client = new LivefluxClient({ adapter });
+      client.connect();
+
+      const a = client.subscribe<number>({ channel: 'trades', into: { strategy: 'append' } });
+      const b = client.subscribe<number>({ channel: 'trades', into: { strategy: 'append' } });
+
+      // One wire subscription total (registry ref-counts) AND one shared store...
+      expect(adapter.subscribed).toEqual(['trades']);
+      adapter.emit('trades', 1);
+      // ...so both handles observe the very same state reference (single fold, not two).
+      expect(a.getState()).toEqual([1]);
+      expect(b.getState()).toBe(a.getState());
+
+      // A late subscriber joins the existing fold and sees the accumulated state.
+      const c = client.subscribe<number>({ channel: 'trades', into: { strategy: 'append' } });
+      expect(c.getState()).toBe(a.getState());
+    });
+
+    it('ref-counts: the wire is released only when the last identical subscriber leaves', () => {
+      const adapter = new MockAdapter();
+      const client = new LivefluxClient({ adapter });
+      client.connect();
+
+      const a = client.subscribe({ channel: 'trades', into: { strategy: 'append' } });
+      const b = client.subscribe({ channel: 'trades', into: { strategy: 'append' } });
+
+      a.destroy();
+      expect(adapter.unsubscribed).toHaveLength(0); // b still holds the fold
+      b.destroy();
+      expect(adapter.unsubscribed).toHaveLength(1); // last one out tears down the wire
+    });
+
+    it('does NOT share function-based configs (reducer) — each gets its own fold', () => {
+      const adapter = new MockAdapter();
+      const client = new LivefluxClient({ adapter });
+      client.connect();
+
+      // A reducer carries functions → never keyed → each subscription gets a private store.
+      const a = client.subscribe<number, number[]>({
+        channel: 'n',
+        into: { strategy: 'reducer', reduce: (arr, e) => [...arr, e.payload as number], initial: [] },
+      });
+      const b = client.subscribe<number, number[]>({
+        channel: 'n',
+        into: { strategy: 'reducer', reduce: (arr, e) => [...arr, e.payload as number], initial: [] },
+      });
+
+      adapter.emit('n', 1); // registry multiplexes the wire by channel, so both folds see the event
+      expect(a.getState()).toEqual([1]);
+      expect(b.getState()).toEqual([1]);
+      expect(a.getState()).not.toBe(b.getState()); // ...but they are distinct stores (not shared)
+    });
+
+    it('does NOT share when params differ (distinct folds)', () => {
+      const adapter = new MockAdapter();
+      const client = new LivefluxClient({ adapter });
+      client.connect();
+
+      const a = client.subscribe<number>({
+        channel: 'trades',
+        into: { strategy: 'append' },
+        params: { room: 1 },
+      });
+      const b = client.subscribe<number>({
+        channel: 'trades',
+        into: { strategy: 'append' },
+        params: { room: 2 },
+      });
+
+      adapter.emit('trades', 1);
+      expect(a.getState()).toEqual([1]);
+      expect(a.getState()).not.toBe(b.getState()); // distinct params → distinct folds (separate stores)
+    });
+  });
 });

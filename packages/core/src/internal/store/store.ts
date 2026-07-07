@@ -14,98 +14,123 @@ type Listener = () => void;
  * chosen strategy. Framework-agnostic and subscribe-able — bindings read it (e.g. via
  * useSyncExternalStore) and re-render when it changes.
  *
- * Payloads are trusted here; schema validation happens upstream (a later increment).
+ * All state is held in `#private` fields — runtime-encapsulated, not merely `private` at compile
+ * time. Payloads are trusted here; schema validation happens upstream (a later increment).
  */
 export class Store<T = unknown, S = T> {
-  private readonly strategy: IntoStrategy<T, S>;
-  private readonly listeners = new Set<Listener>();
+  readonly #strategy: IntoStrategy<T, S>;
+  readonly #listeners = new Set<Listener>();
 
-  /** append / upsert state */
-  private list: T[] = [];
-  /** upsert: key → index in `list` */
-  private readonly keyIndex = new Map<Id, number>();
+  // Only the current strategy's backing state is allocated (see constructor): a `replace` or
+  // `reducer` store carries neither the list nor the entities map — lean at scale (many stores).
+  /** append state */
+  #list: T[] | null = null;
+  /** upsert state: insertion-ordered id → item — O(1) set/delete, no index to rebuild */
+  #entities: Map<Id, T> | null = null;
+  /** upsert: lazily materialized, cached array view of `#entities` (invalidated on each change) */
+  #upsertSnapshot: T[] | null = null;
   /** replace state */
-  private latest: T | undefined;
+  #latest: T | undefined;
   /** reducer state */
-  private reduced: S | undefined;
+  #reduced: S | undefined;
 
   constructor(strategy: IntoStrategy<T, S>) {
-    this.strategy = strategy;
-    if (strategy.strategy === 'reducer') this.reduced = strategy.initial;
+    this.#strategy = strategy;
+    // Allocate exactly the backing state this strategy uses — nothing more.
+    switch (strategy.strategy) {
+      case 'append':
+        this.#list = [];
+        break;
+      case 'upsert':
+        this.#entities = new Map();
+        break;
+      case 'reducer':
+        this.#reduced = strategy.initial;
+        break;
+      // 'replace' keeps only `#latest` — no collection to allocate
+    }
   }
 
   /** Current derived state. Shape depends on the strategy: `T[] | T | S | undefined`. */
   getState(): T[] | T | S | undefined {
-    switch (this.strategy.strategy) {
+    switch (this.#strategy.strategy) {
       case 'append':
+        return this.#list!; // allocated in the constructor for 'append'
       case 'upsert':
-        return this.list;
+        // Materialize once per change, then serve the cached array (stable ref between events).
+        if (this.#upsertSnapshot === null) this.#upsertSnapshot = [...this.#entities!.values()];
+        return this.#upsertSnapshot;
       case 'replace':
-        return this.latest;
+        return this.#latest;
       case 'reducer':
-        return this.reduced;
+        return this.#reduced;
     }
   }
 
   /** Subscribe to state changes. Returns an unsubscribe function. */
   subscribe(listener: Listener): () => void {
-    this.listeners.add(listener);
+    this.#listeners.add(listener);
     return () => {
-      this.listeners.delete(listener);
+      this.#listeners.delete(listener);
     };
   }
 
   /** Fold one event into the state, then notify subscribers. */
   apply(event: NormalizedEvent): void {
-    const s = this.strategy;
+    const s = this.#strategy;
     switch (s.strategy) {
       case 'append': {
-        const next = [...this.list, event.payload as T];
-        this.list =
-          s.cap !== undefined && next.length > s.cap ? next.slice(next.length - s.cap) : next;
+        const cap = s.cap;
+        const list = this.#list!; // allocated in the constructor for 'append'
+        if (cap === undefined) {
+          this.#list = [...list, event.payload as T];
+        } else if (cap <= 0) {
+          this.#list = [];
+        } else {
+          // Keep the last `cap` items of (list + payload) in ONE new array — no spread-then-slice.
+          const drop = list.length + 1 - cap;
+          const next = drop > 0 ? list.slice(drop) : list.slice();
+          next.push(event.payload as T);
+          this.#list = next;
+        }
         break;
       }
       case 'upsert': {
         const item = event.payload as T;
-        const id = this.keyOf(s.key, item);
-        const pos = this.keyIndex.get(id);
-        if (pos !== undefined) {
-          const next = this.list.slice();
-          next[pos] = item;
-          this.list = next; // same positions → index unchanged
-        } else {
-          this.list = [...this.list, item];
-          this.keyIndex.set(id, this.list.length - 1);
-          if (s.cap !== undefined && this.list.length > s.cap) {
-            this.list = this.list.slice(this.list.length - s.cap);
-            this.reindexUpsert(s.key); // positions shifted after the trim
-          }
+        const entities = this.#entities!; // allocated in the constructor for 'upsert'
+        const id = this.#keyOf(s.key, item);
+        const existed = entities.has(id);
+        entities.set(id, item); // O(1) — updates in place (keeps order) or appends at the end
+        if (!existed && s.cap !== undefined && entities.size > s.cap) {
+          // Drop the oldest (first-inserted). Map preserves insertion order, so this is O(1) — no
+          // index rebuild, unlike a positional array.
+          const oldest = entities.keys().next().value;
+          if (oldest !== undefined) entities.delete(oldest);
         }
+        this.#upsertSnapshot = null; // invalidate the cached view
         break;
       }
       case 'replace': {
-        this.latest = event.payload as T;
+        this.#latest = event.payload as T;
         break;
       }
       case 'reducer': {
-        this.reduced = s.reduce(this.reduced as S, event);
+        this.#reduced = s.reduce(this.#reduced as S, event);
         break;
       }
     }
-    this.notify();
+    this.#notify();
   }
 
-  private keyOf(key: keyof T | ((item: T) => Id), item: T): Id {
+  #keyOf(key: keyof T | ((item: T) => Id), item: T): Id {
     return typeof key === 'function' ? key(item) : (item[key] as unknown as Id);
   }
 
-  private reindexUpsert(key: keyof T | ((item: T) => Id)): void {
-    this.keyIndex.clear();
-    this.list.forEach((item, i) => this.keyIndex.set(this.keyOf(key, item), i));
-  }
-
-  private notify(): void {
-    for (const listener of [...this.listeners]) {
+  #notify(): void {
+    // Iterate the live set directly — no per-event snapshot allocation. Deleting a listener mid-
+    // dispatch is safe under Set iteration, and store listeners (useSyncExternalStore callbacks)
+    // don't (un)subscribe synchronously. A throwing listener is isolated so it can't break fan-out.
+    for (const listener of this.#listeners) {
       try {
         listener();
       } catch (err) {

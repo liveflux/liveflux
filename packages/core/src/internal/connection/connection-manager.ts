@@ -29,134 +29,140 @@ type StateListener = (state: ConnectionState, previous: ConnectionState) => void
 /**
  * Owns a StreamAdapter's connection lifecycle: connect/close, automatic backoff reconnection,
  * and an optional heartbeat. Transport-agnostic — it only speaks the StreamAdapter contract.
- * Internal to the package: consumers drive it through the LivefluxClient context layer.
+ * Internal to the package: consumers drive it through the LivefluxClient context layer, and all
+ * state is `#private` (runtime-encapsulated).
  */
 export class ConnectionManager {
-  private readonly adapter: StreamAdapter;
-  private readonly reconnect: ReconnectPolicy;
-  private readonly heartbeat: HeartbeatPolicy;
-  private readonly random: () => number;
-  private readonly onEvent: ((event: NormalizedEvent) => void) | undefined;
+  readonly #adapter: StreamAdapter;
+  readonly #reconnect: ReconnectPolicy;
+  readonly #heartbeat: HeartbeatPolicy;
+  readonly #random: () => number;
+  readonly #onEvent: ((event: NormalizedEvent) => void) | undefined;
 
-  private state: ConnectionState = 'idle';
-  private attempts = 0; // consecutive failed reconnects
-  private manualClose = false; // was close() called by the user?
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-  private readonly listeners = new Set<StateListener>();
+  #state: ConnectionState = 'idle';
+  #attempts = 0; // consecutive failed reconnects
+  #manualClose = false; // was close() called by the user?
+  #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  #heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  readonly #listeners = new Set<StateListener>();
 
   constructor(opts: ConnectionManagerOptions) {
-    this.adapter = opts.adapter;
-    this.reconnect = resolveReconnectPolicy(opts.reconnect);
-    this.heartbeat = { ...defaultHeartbeatPolicy, ...opts.heartbeat };
-    this.random = opts.random ?? Math.random;
-    this.onEvent = opts.onEvent;
+    this.#adapter = opts.adapter;
+    this.#reconnect = resolveReconnectPolicy(opts.reconnect);
+    const hb = { ...defaultHeartbeatPolicy, ...opts.heartbeat };
+    this.#heartbeat = {
+      enabled: hb.enabled === true,
+      // A 0/negative/NaN interval would spam setInterval — fall back to the safe default.
+      intervalMs:
+        Number.isFinite(hb.intervalMs) && hb.intervalMs > 0
+          ? hb.intervalMs
+          : defaultHeartbeatPolicy.intervalMs,
+    };
+    this.#random = opts.random ?? Math.random;
+    this.#onEvent = opts.onEvent;
   }
 
   /** Current connection state. */
   getState(): ConnectionState {
-    return this.state;
+    return this.#state;
   }
 
   /** Subscribe to state transitions. Returns an unsubscribe function. */
   onStateChange(listener: StateListener): () => void {
-    this.listeners.add(listener);
+    this.#listeners.add(listener);
     return () => {
-      this.listeners.delete(listener);
+      this.#listeners.delete(listener);
     };
   }
 
   /** Open the connection. No-op while already connecting/open. */
   connect(): void {
-    if (this.state === 'connecting' || this.state === 'open') return;
-    this.manualClose = false;
-    this.clearReconnect(); // cancel any pending backoff and connect now
-    this.openAdapter();
+    if (this.#state === 'connecting' || this.#state === 'open') return;
+    this.#manualClose = false;
+    this.#clearReconnect(); // cancel any pending backoff and connect now
+    this.#openAdapter();
   }
 
   /** Close permanently: cancels reconnect/heartbeat and disconnects the adapter. Idempotent. */
   close(): void {
-    if (this.state === 'closed') return;
-    this.manualClose = true;
-    this.clearReconnect();
-    this.stopHeartbeat();
-    this.adapter.disconnect();
-    this.setState('closed');
+    if (this.#state === 'closed') return;
+    this.#manualClose = true;
+    this.#clearReconnect();
+    this.#stopHeartbeat();
+    this.#adapter.disconnect();
+    this.#setState('closed');
   }
 
-  /**
-   * Internal implementation.
-   */
-  private openAdapter(): void {
-    this.setState(this.attempts > 0 ? 'reconnecting' : 'connecting');
+  #openAdapter(): void {
+    this.#setState(this.#attempts > 0 ? 'reconnecting' : 'connecting');
     const handlers: AdapterHandlers = {
-      onOpen: () => this.handleOpen(),
-      onClose: () => this.handleClose(),
+      onOpen: () => this.#handleOpen(),
+      onClose: () => this.#handleClose(),
       onError: () => {
         /* errors surface via observability later; the ensuing close drives reconnect */
       },
       onEvent: (event) => {
-        this.onEvent?.(event);
+        this.#onEvent?.(event);
       },
     };
-    this.adapter.connect(handlers);
+    this.#adapter.connect(handlers);
   }
 
-  private handleOpen(): void {
-    this.attempts = 0;
-    this.setState('open');
-    this.startHeartbeat();
+  #handleOpen(): void {
+    this.#attempts = 0;
+    this.#setState('open');
+    this.#startHeartbeat();
   }
 
-  private handleClose(): void {
-    this.stopHeartbeat();
-    if (this.manualClose) {
-      this.setState('closed');
+  #handleClose(): void {
+    this.#stopHeartbeat();
+    if (this.#manualClose) {
+      this.#setState('closed');
       return;
     }
-    this.scheduleReconnect();
+    this.#scheduleReconnect();
   }
 
-  private scheduleReconnect(): void {
-    if (!this.reconnect.enabled || this.attempts >= this.reconnect.maxAttempts) {
-      this.setState('closed');
+  #scheduleReconnect(): void {
+    if (!this.#reconnect.enabled || this.#attempts >= this.#reconnect.maxAttempts) {
+      this.#setState('closed');
       return;
     }
-    this.attempts += 1;
-    const delay = backoffDelay(this.attempts, this.reconnect, this.random);
-    this.setState('reconnecting');
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.openAdapter();
+    this.#attempts += 1;
+    const delay = backoffDelay(this.#attempts, this.#reconnect, this.#random);
+    this.#setState('reconnecting');
+    this.#reconnectTimer = setTimeout(() => {
+      this.#reconnectTimer = null;
+      this.#openAdapter();
     }, delay);
   }
 
-  private startHeartbeat(): void {
-    if (!this.heartbeat.enabled || !this.adapter.heartbeat) return;
-    this.heartbeatTimer = setInterval(() => this.adapter.heartbeat?.(), this.heartbeat.intervalMs);
+  #startHeartbeat(): void {
+    if (!this.#heartbeat.enabled || !this.#adapter.heartbeat) return;
+    this.#heartbeatTimer = setInterval(() => this.#adapter.heartbeat?.(), this.#heartbeat.intervalMs);
   }
 
-  private stopHeartbeat(): void {
-    if (this.heartbeatTimer !== null) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = null;
+  #stopHeartbeat(): void {
+    if (this.#heartbeatTimer !== null) {
+      clearInterval(this.#heartbeatTimer);
+      this.#heartbeatTimer = null;
     }
   }
 
-  private clearReconnect(): void {
-    if (this.reconnectTimer !== null) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
+  #clearReconnect(): void {
+    if (this.#reconnectTimer !== null) {
+      clearTimeout(this.#reconnectTimer);
+      this.#reconnectTimer = null;
     }
   }
 
-  private setState(next: ConnectionState): void {
-    if (next === this.state) return;
-    const previous = this.state;
-    this.state = next;
+  #setState(next: ConnectionState): void {
+    if (next === this.#state) return;
+    const previous = this.#state;
+    this.#state = next;
     // Notify a snapshot so a listener that (un)subscribes during dispatch can't corrupt iteration,
     // and isolate failures so one bad subscriber can't break the state machine or the others.
-    for (const listener of [...this.listeners]) {
+    for (const listener of [...this.#listeners]) {
       try {
         listener(next, previous);
       } catch (err) {

@@ -1,0 +1,7 @@
+[
+  {
+    "name": "@liveflux/core",
+    "path": "dist/index.js",
+    "limit": "2 kB"
+  }
+]
