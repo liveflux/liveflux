@@ -32,13 +32,13 @@ describe('Store', () => {
     ]);
   });
 
-  it('upsert supports a key function and cap (index rebuilt after trim)', () => {
+  it('upsert supports a key function and cap (oldest trimmed at cap)', () => {
     type Row = { id: number };
     const store = new Store<Row>({ strategy: 'upsert', key: (r) => r.id, cap: 2 });
     store.apply(evt({ id: 1 }));
     store.apply(evt({ id: 2 }));
-    store.apply(evt({ id: 3 })); // trims id 1 → [{2},{3}]
-    store.apply(evt({ id: 2 })); // still replaces id 2
+    store.apply(evt({ id: 3 })); // trims oldest (id 1) → [{2},{3}]
+    store.apply(evt({ id: 2 })); // updates id 2 in place (no growth, order stable)
     expect(store.getState()).toEqual([{ id: 2 }, { id: 3 }]);
   });
 
@@ -71,5 +71,20 @@ describe('Store', () => {
     off();
     store.apply(evt(2));
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('tolerates a listener that unsubscribes itself during notify (direct iteration)', () => {
+    const store = new Store<number>({ strategy: 'append' });
+    const other = vi.fn();
+    let off = () => {};
+    const selfRemoving = vi.fn(() => off());
+    off = store.subscribe(selfRemoving);
+    store.subscribe(other);
+    expect(() => store.apply(evt(1))).not.toThrow();
+    expect(selfRemoving).toHaveBeenCalledTimes(1);
+    expect(other).toHaveBeenCalledTimes(1); // fan-out to the rest is unaffected
+    store.apply(evt(2));
+    expect(selfRemoving).toHaveBeenCalledTimes(1); // stayed unsubscribed
+    expect(other).toHaveBeenCalledTimes(2);
   });
 });

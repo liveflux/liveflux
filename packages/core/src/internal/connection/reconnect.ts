@@ -33,9 +33,34 @@ export const defaultReconnectPolicy: Readonly<ReconnectPolicy> = Object.freeze({
   maxAttempts: Number.POSITIVE_INFINITY,
 });
 
-/** Merge a user-supplied partial policy over the defaults. */
+/** A finite number ≥ 0, or the fallback if the input is NaN/Infinity/negative/non-numeric. */
+function safeNonNeg(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+/**
+ * Merge a user-supplied partial policy over the defaults, then clamp to safe invariants. A
+ * malformed policy (negative/NaN delays, a shrinking `factor < 1`, out-of-range `jitter`) must
+ * never be able to schedule a 0-, negative-, or NaN-delay reconnect storm against the server.
+ */
 export function resolveReconnectPolicy(policy?: Partial<ReconnectPolicy>): ReconnectPolicy {
-  return { ...defaultReconnectPolicy, ...policy };
+  const p = { ...defaultReconnectPolicy, ...policy };
+  const baseMs = safeNonNeg(p.baseMs, defaultReconnectPolicy.baseMs);
+  return {
+    enabled: p.enabled !== false, // any non-false → enabled (default true)
+    baseMs,
+    // Ceiling is always finite and never below the floor (keeps backoffDelay's fallback safe).
+    maxMs: Math.max(baseMs, safeNonNeg(p.maxMs, defaultReconnectPolicy.maxMs)),
+    // Backoff must never shrink: factor ≥ 1.
+    factor: Math.max(1, safeNonNeg(p.factor, defaultReconnectPolicy.factor)),
+    // Jitter is a fraction: clamp to [0, 1] so it can't drive a delay negative.
+    jitter: Math.min(1, safeNonNeg(p.jitter, defaultReconnectPolicy.jitter)),
+    // Infinity is valid (retry forever, the default); reject only NaN/negative.
+    maxAttempts:
+      typeof p.maxAttempts === 'number' && !Number.isNaN(p.maxAttempts) && p.maxAttempts >= 0
+        ? p.maxAttempts
+        : defaultReconnectPolicy.maxAttempts,
+  };
 }
 
 /**

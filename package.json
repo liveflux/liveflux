@@ -2,7 +2,7 @@
   "name": "liveflux",
   "version": "0.0.0",
   "private": true,
-  "description": "Type-safe, cache-integrated realtime streaming state for the frontend — protocol- and framework-agnostic, with reconnect-safe delivery and backpressure control.",
+  "description": "Type-safe, cache-integrated, reconnect-safe realtime streaming state for the frontend.",
   "license": "MIT",
   "author": {
     "name": "Bhavin Devamorari",
@@ -14,15 +14,19 @@
     "node": ">=20.19.0"
   },
   "scripts": {
-    "build": "pnpm -r build",
-    "test": "vitest run",
-    "typecheck": "pnpm -r typecheck",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "size": "turbo run size",
+    "check": "turbo run typecheck test build size",
     "format": "prettier --write .",
     "ship": "bash scripts/ship.sh"
   },
   "devDependencies": {
+    "@size-limit/preset-small-lib": "^11.1.6",
     "prettier": "^3.4.0",
-    "typescript": "^5.7.0",
-    "vitest": "^2.1.0"
+    "size-limit": "^11.1.6",
+    "turbo": "^2.3.0",
+    "typescript": "^5.7.0"
   }
 }

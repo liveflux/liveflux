@@ -24,8 +24,8 @@
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "format": "prettier --write src",
-    "check": "pnpm run format && pnpm run typecheck && pnpm run test && pnpm run build"
+    "size": "size-limit",
+    "format": "prettier --write src"
   },
   "devDependencies": {
     "tsup": "^8.3.0",
