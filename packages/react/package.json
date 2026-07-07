@@ -1,0 +1,44 @@
+{
+  "name": "@liveflux/react",
+  "version": "0.0.0",
+  "description": "React binding for Liveflux — the useStream hook for typed, reconnect-safe realtime state.",
+  "license": "MIT",
+  "author": {
+    "name": "Bhavin Devamorari",
+    "url": "https://bpdm.dev"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "files": ["dist"],
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "size": "size-limit",
+    "format": "prettier --write src"
+  },
+  "peerDependencies": {
+    "@liveflux/core": "workspace:*",
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@liveflux/core": "workspace:*",
+    "@testing-library/react": "^16.1.0",
+    "@types/react": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^25.0.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}
