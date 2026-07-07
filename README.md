@@ -14,6 +14,7 @@ stop hand-rolling sockets, cache glue, dedup, backpressure, and reconnect logic.
 | ---------------- | -------------------------------------------------------------------------- |
 | `@liveflux/core` | Framework-agnostic engine (connection, subscriptions, store, backpressure) |
 | `@liveflux/ws` | Generic WebSocket adapter — works with any plain-WebSocket backend, in any language |
+| `@liveflux/react` | React binding — the `useStream` hook (tear-free via `useSyncExternalStore`) + `LivefluxProvider` |
 
 ## Development
 
