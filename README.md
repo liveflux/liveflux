@@ -13,6 +13,7 @@ stop hand-rolling sockets, cache glue, dedup, backpressure, and reconnect logic.
 | Package          | Description                                                                |
 | ---------------- | -------------------------------------------------------------------------- |
 | `@liveflux/core` | Framework-agnostic engine (connection, subscriptions, store, backpressure) |
+| `@liveflux/ws` | Generic WebSocket adapter — works with any plain-WebSocket backend, in any language |
 
 ## Development
 
