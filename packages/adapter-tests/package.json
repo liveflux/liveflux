@@ -1,7 +1,7 @@
 {
-  "name": "@liveflux/ws",
+  "name": "@liveflux/adapter-tests",
   "version": "0.0.0",
-  "description": "Generic WebSocket adapter for Liveflux — works with any backend that exposes a plain WebSocket, in any language.",
+  "description": "Testing moat for Liveflux — a programmable MockAdapter plus a shared, protocol-agnostic conformance suite every StreamAdapter must pass.",
   "license": "MIT",
   "author": {
     "name": "Bhavin Devamorari",
@@ -26,10 +26,10 @@
     "format": "prettier --write src"
   },
   "peerDependencies": {
-    "@liveflux/core": "workspace:*"
+    "@liveflux/core": "workspace:*",
+    "vitest": ">=2"
   },
   "devDependencies": {
-    "@liveflux/adapter-tests": "workspace:*",
     "@liveflux/core": "workspace:*",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",
