@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@liveflux/core": ["../../packages/core/src/index.ts"],
+      "@liveflux/ws": ["../../packages/ws/src/index.ts"],
+      "@liveflux/react": ["../../packages/react/src/index.tsx"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}
