@@ -1,0 +1,8 @@
+[
+  {
+    "name": "@liveflux/adapter-tests",
+    "path": "dist/index.js",
+    "limit": "2 kB",
+    "ignore": ["@liveflux/core", "vitest"]
+  }
+]

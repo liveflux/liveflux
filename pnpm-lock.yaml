@@ -64,6 +64,21 @@ importers:
         specifier: ^8.18.0
         version: 8.21.0
 
+  packages/adapter-tests:
+    devDependencies:
+      '@liveflux/core':
+        specifier: workspace:*
+        version: link:../core
+      tsup:
+        specifier: ^8.3.0
+        version: 8.5.1(jiti@2.7.0)(postcss@8.5.16)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@20.19.43)(jsdom@25.0.1)
+
   packages/core:
     devDependencies:
       tsup:
@@ -111,6 +126,9 @@ importers:
 
   packages/ws:
     devDependencies:
+      '@liveflux/adapter-tests':
+        specifier: workspace:*
+        version: link:../adapter-tests
       '@liveflux/core':
         specifier: workspace:*
         version: link:../core
