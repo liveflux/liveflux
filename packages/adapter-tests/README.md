@@ -11,7 +11,13 @@ The Liveflux **testing moat** — two tools with zero runtime dependencies:
   own transport, guaranteeing cross-adapter parity.
 
 Both are tree-shakeable: importing `MockAdapter` alone pulls in no test-runner code, so it adds
-nothing to a production bundle. The conformance suite runs under the consumer's own Vitest.
+nothing to a production bundle. The conformance suite runs under the consumer's own Vitest. For a
+guaranteed test-runner-free import (no `vitest` in the module graph at all), import the adapter from
+the `/mock` subpath:
+
+```ts
+import { MockAdapter } from '@liveflux/adapter-tests/mock'; // MockAdapter only — no conformance suite
+```
 
 ## Install
 
@@ -81,7 +87,11 @@ runAdapterConformance({
       drop: (reason) => server.close(reason),
       sentSubscribes: () => server.decodedSubscribes(),
       sentUnsubscribes: () => server.unsubscribedSubIds(),
-      // Provide `sentResumes` only if the adapter implements the optional `resume` capability.
+      // Optional seams — provide only the ones your transport can model; scenarios gated on a
+      // missing seam are skipped:
+      //   sentResumes    → adapters implementing the optional `resume` capability
+      //   fail           → inject a transport error (drives the onError scenario)
+      //   sentHeartbeats → count observable keepalive frames (drives the heartbeat scenario)
     };
   },
 });
@@ -89,20 +99,38 @@ runAdapterConformance({
 
 ### The contract it proves
 
+**Universal** (every adapter, always run):
+
 1. **connect → onOpen.**
 2. **subscribe** encodes a faithful `SubscribeRequest` (params included).
-3. an inbound server event **surfaces as a normalized `onEvent`** (channel / event / payload /
+3. **subscribe-before-open** sends **exactly one** frame per subId — a sub issued while the link is
+   still opening is neither lost nor double-sent (no eager-push + reopen-replay duplication).
+4. an inbound server event **surfaces as a normalized `onEvent`** (channel / event / payload /
    cursor / meta preserved).
-4. **unsubscribe** sends its frame and is **not replayed** on the next reconnect. (Event _filtering_
+5. **multi-channel routing** has no cross-talk: with two channels live, an event on each surfaces
+   once carrying its own channel.
+6. **event order is preserved** (A, B, C in → A, B, C out).
+7. **unsubscribe** sends its frame and is **not replayed** on the next reconnect. (Event _filtering_
    is the core's job — the registry drops events for channels with no listeners; the adapter's
    guarantee is the wire teardown plus no replay.)
-5. an unexpected **drop → `onClose`**, then reconnect **re-subscribes the active set**. The core
-   reacts to a close by calling `connect` again — never `subscribe` — so replaying active
-   subscriptions on the fresh connection is the adapter's responsibility.
-6. **resume-from-cursor** (optional, v0.2): if the adapter implements `resume`, calling
-   `resume(subId, cursor)` transmits a gap-recovery frame carrying exactly that cursor (and a `null`
-   cursor for a from-scratch resync). Adapters without the capability skip this scenario.
-7. **disconnect** cleans up: no server activity reaches the handlers afterward.
+8. an **unknown / already-removed unsubscribe** is a no-op — no throw, no spurious frame.
+9. an unexpected **drop → `onClose`**, then reconnect **replays each active sub exactly once** (at
+   ~20 subs). The core reacts to a close by calling `connect` again — never `subscribe` — so
+   replaying active subscriptions on the fresh connection is the adapter's responsibility.
+13. **disconnect** cleans up: no server activity reaches the handlers afterward.
+
+**Capability-gated** (run only when the harness provides the matching seam):
+
+10. **resume-from-cursor** (optional, v0.2, seam `sentResumes`): if the adapter implements `resume`,
+    `resume(subId, cursor)` transmits a gap-recovery frame carrying exactly that cursor (and a
+    `null` cursor for a from-scratch resync).
+11. **onError surfacing** (seam `fail`): a transport error injected via the harness surfaces through
+    `onError` with the same value.
+12. **heartbeat keepalive** (seam `sentHeartbeats`): each `heartbeat()` while open puts exactly one
+    keepalive frame on the wire; none while the link is not open.
+
+> A channel-level error → rejoin scenario (a single channel erroring while the socket stays up) is a
+> TODO — it needs fake-timer control over the adapter's backoff plus a per-channel-error seam.
 
 ## License
 

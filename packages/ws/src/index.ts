@@ -27,8 +27,11 @@ export type OutboundFrame =
   | { type: 'heartbeat' };
 
 export interface WsOptions {
-  /** WebSocket sub-protocol(s). */
-  protocols?: string | string[];
+  /**
+   * WebSocket sub-protocol(s). Pass a function to resolve them lazily on every (re)connect — the
+   * same rotation story as a function `url` (e.g. a protocol-carried bearer token).
+   */
+  protocols?: string | string[] | (() => string | string[] | undefined);
   /** Encode an outbound control frame to a wire string. Default: `JSON.stringify`. */
   encode?: (frame: OutboundFrame) => string;
   /**
@@ -95,8 +98,12 @@ function defaultDecode(raw: unknown): NormalizedEvent | null {
  * makes `__proto__` an own, non-polluting key). Payload is opaque app data; payload schema
  * validation is the consumer's / core's concern. The returned adapter is frozen and all socket
  * state is closure-private.
+ *
+ * Reconnect auth: pass `url` (and/or `protocols`) as a function to re-resolve it on every
+ * (re)connect — a rotated short-lived token in the query string or a sub-protocol is picked up on
+ * the reconnect that follows an auth-expiry close, with no adapter rebuild.
  */
-export function ws(url: string, options: WsOptions = {}): StreamAdapter {
+export function ws(url: string | (() => string), options: WsOptions = {}): StreamAdapter {
   const encode = options.encode ?? JSON.stringify;
   const decode = options.decode ?? defaultDecode;
   const maxBuffered = options.maxBufferedAmount ?? DEFAULT_MAX_BUFFERED;
@@ -108,6 +115,7 @@ export function ws(url: string, options: WsOptions = {}): StreamAdapter {
     ((globalThis as { WebSocket?: unknown }).WebSocket as WebSocketCtor | undefined);
 
   let socket: WebSocketLike | null = null;
+  const isOpen = (): boolean => socket !== null && socket.readyState === OPEN;
   // subId → the pre-encoded subscribe frame. A subscribe frame is immutable once created, so it is
   // encoded exactly once and the wire string is reused verbatim on every reconnect.
   const active = new Map<string, string>();
@@ -153,7 +161,11 @@ export function ws(url: string, options: WsOptions = {}): StreamAdapter {
       // Fully retire any prior socket so a reconnect never leaves a dangling connection behind.
       if (socket) retire(socket);
       outbox.reset(); // drop stale pending; `active` is the source of truth on (re)connect
-      const s = new Ctor(url, options.protocols);
+      // Resolve url / protocols per (re)connect so a rotated token re-auths on reconnect.
+      const resolvedUrl = typeof url === 'function' ? url() : url;
+      const resolvedProtocols =
+        typeof options.protocols === 'function' ? options.protocols() : options.protocols;
+      const s = new Ctor(resolvedUrl, resolvedProtocols);
       socket = s;
       s.onopen = () => {
         for (const data of active.values()) outbox.push(data); // replay cached subs (backpressured)
@@ -187,12 +199,15 @@ export function ws(url: string, options: WsOptions = {}): StreamAdapter {
       };
       const data = encode(frame);
       active.set(sub.subId, data); // cache the wire string once; reused on every reconnect
-      outbox.push(data);
+      // Send now only if the link is up; otherwise the next onOpen replays the whole active set (so
+      // a subscribe issued before open is never lost and never double-sent).
+      if (isOpen()) outbox.push(data);
     },
 
     unsubscribe(subId: string): void {
+      if (!active.has(subId)) return; // idempotent: unknown / already-removed → no wire frame
       active.delete(subId);
-      outbox.push(encode({ type: 'unsubscribe', subId }));
+      if (isOpen()) outbox.push(encode({ type: 'unsubscribe', subId }));
     },
 
     heartbeat(): void {

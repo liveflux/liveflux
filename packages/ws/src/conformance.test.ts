@@ -55,6 +55,10 @@ function unsubscribeSubId(raw: string): string | null {
   return frame.type === 'unsubscribe' ? frame.subId : null;
 }
 
+function isHeartbeat(raw: string): boolean {
+  return (JSON.parse(raw) as OutboundFrame).type === 'heartbeat';
+}
+
 runAdapterConformance({
   name: '@liveflux/ws',
   setup(): AdapterHarness {
@@ -73,6 +77,8 @@ runAdapterConformance({
       open: () => latest().open(),
       emit: (event: NormalizedEvent) => latest().emit(JSON.stringify(event)),
       drop: (reason) => latest().drop(reason),
+      // Inject a transport error through the socket's error path — ws forwards it to `onError`.
+      fail: (err) => latest().onerror?.(err),
       sentSubscribes: () =>
         allSent()
           .map(subscribeFrame)
@@ -81,8 +87,11 @@ runAdapterConformance({
         allSent()
           .map(unsubscribeSubId)
           .filter((id): id is string => id !== null),
+      // Count the keepalive frames ws puts on the wire (`{ type: 'heartbeat' }`).
+      sentHeartbeats: () => allSent().filter(isHeartbeat).length,
       // `@liveflux/ws` does not implement the optional `resume` capability, so the resume scenario
-      // is skipped for it (no `sentResumes`).
+      // is skipped for it (no `sentResumes`). It has no per-channel-error concept either, so it
+      // provides no channel-error seam.
     };
   },
 });

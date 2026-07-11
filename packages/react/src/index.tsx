@@ -1,3 +1,5 @@
+'use client';
+
 import {
   createContext,
   useCallback,
@@ -118,7 +120,14 @@ export function useStream<T, S = T, R = unknown>(
   isEqual: (a: R, b: R) => boolean = Object.is,
 ): T[] | T | S | undefined | R {
   const client = useClient();
-  const { channel } = config;
+  const { channel, params, into } = config;
+
+  // A stable identity for the wire subscription, mirroring core's subscription identity (channel +
+  // params + strategy). `useSyncExternalStore` re-subscribes when `subscribe` changes identity, so
+  // keying it on this — not just `channel` — tears down the old subscription and opens the new one
+  // whenever `params` or the fold `strategy` change. Without it the component would silently keep
+  // the OLD subscription and render the wrong stream's data.
+  const key = channel + '|' + JSON.stringify(params ?? null) + '|' + into.strategy;
 
   // All per-instance mutable state lives in ONE lazily-initialised ref (one hook slot, one object),
   // including the selector memo. Nothing is allocated per render — the latest render inputs are just
@@ -158,8 +167,9 @@ export function useStream<T, S = T, R = unknown>(
         i.sub = null;
       };
     },
-    // Subscription lifecycle is owned by React: re-run only on client / channel change.
-    [client, channel],
+    // Subscription lifecycle is owned by React: re-run when the client or the subscription identity
+    // (channel + params + strategy, via `key`) changes — a clean teardown + re-subscribe.
+    [client, key],
   );
 
   // Snapshot memoisation is encapsulated in SnapshotMemo. `select` maps the raw state and `isEqual`

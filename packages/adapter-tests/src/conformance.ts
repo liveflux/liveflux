@@ -35,6 +35,12 @@ export interface AdapterHarness {
   emit(event: NormalizedEvent): MaybePromise<void>;
   /** Play the server: unexpectedly close the live connection. The adapter must fire `onClose`. */
   drop(reason?: unknown): MaybePromise<void>;
+  /**
+   * Play the server: surface a transport-level error on the live connection. The adapter must fire
+   * `onError` with the value passed here. Provide this only for adapters whose harness can inject an
+   * error (e.g. the socket's error path); omit it otherwise and the onError scenario is skipped.
+   */
+  fail?(err: unknown): MaybePromise<void>;
 
   /** Every subscribe frame the adapter has sent, in order — including reconnect replays. */
   sentSubscribes(): readonly SubscribeRequest[];
@@ -46,6 +52,12 @@ export interface AdapterHarness {
    * skipped.
    */
   sentResumes?(): readonly ResumeFrame[];
+  /**
+   * How many heartbeat keepalive frames the adapter has put on the wire so far. Provide this only
+   * for adapters that emit an observable keepalive frame from `heartbeat()`; omit it otherwise and
+   * the heartbeat scenario is skipped.
+   */
+  sentHeartbeats?(): number;
 }
 
 /** Options for {@link runAdapterConformance}. */
@@ -114,18 +126,34 @@ function countBySubId(frames: readonly SubscribeRequest[]): Map<string, number> 
  * 1. **connect → onOpen.** The core opens the adapter and waits for `onOpen` before it is `open`.
  * 2. **subscribe encodes a faithful SubscribeRequest.** The registry hands the adapter a
  *    `{ subId, channel, params? }`; the adapter must transmit exactly that (params included).
- * 3. **a server event surfaces as a normalized onEvent.** The adapter decodes the wire frame into a
+ * 3. **subscribe-before-open sends exactly one frame per subId.** A subscribe issued while the link
+ *    is still opening must not be lost *nor* double-sent: on open the adapter replays the active set
+ *    and each subId appears exactly once on the wire (no eager-push + replay duplication).
+ * 4. **a server event surfaces as a normalized onEvent.** The adapter decodes the wire frame into a
  *    transport-neutral `NormalizedEvent` (channel / event / payload / cursor / meta preserved).
- * 4. **unsubscribe sends its frame and is not replayed on reconnect.** Event *filtering* is the
+ * 5. **multi-channel routing has no cross-talk.** With two channels live, an event on one surfaces
+ *    once carrying that channel; an event on the other surfaces once carrying the other.
+ * 6. **event order is preserved.** Events emitted A, B, C surface in that order.
+ * 7. **unsubscribe sends its frame and is not replayed on reconnect.** Event *filtering* is the
  *    core's job (the registry drops events for dropped channels); the adapter's guarantee is that it
  *    sends the unsubscribe frame and removes the sub from the set it replays on reopen.
- * 5. **an unexpected drop → onClose, then reconnect re-subscribes the active set.** The core reacts
- *    to `onClose` by calling `connect` again (never `subscribe`), so the adapter must replay every
- *    active subscription on the fresh connection.
- * 6. **resume-from-cursor (optional, v0.2).** If the adapter implements `resume`, calling
+ * 8. **an unknown / already-removed unsubscribe is a no-op.** It must not throw or emit a spurious
+ *    unsubscribe frame.
+ * 9. **an unexpected drop → onClose, then reconnect replays each active sub exactly once.** The core
+ *    reacts to `onClose` by calling `connect` again (never `subscribe`), so the adapter must replay
+ *    every active subscription on the fresh connection — once each, at any scale.
+ * 10. **resume-from-cursor (optional, v0.2).** If the adapter implements `resume`, calling
  *    `resume(subId, cursor)` transmits a gap-recovery frame carrying exactly that cursor (and a
  *    `null` cursor for a from-scratch resync). Skipped for adapters without the capability.
- * 7. **disconnect cleans up.** After `disconnect` no further server activity reaches the handlers.
+ * 11. **onError surfacing (optional seam `fail`).** A transport error injected via the harness
+ *    surfaces through `onError` with the same value. Skipped when the harness can't inject one.
+ * 12. **heartbeat keepalive (optional seam `sentHeartbeats`).** Each `heartbeat()` while open puts
+ *    exactly one keepalive frame on the wire; none is sent while the link is not open. Skipped when
+ *    the adapter emits no observable keepalive frame.
+ * 13. **disconnect cleans up.** After `disconnect` no further server activity reaches the handlers.
+ *
+ * TODO: a channel-level error → rejoin scenario (a single channel erroring while the socket stays up)
+ * needs fake-timer control over the adapter's backoff and a per-channel-error harness seam; deferred.
  */
 export function runAdapterConformance(options: AdapterConformanceOptions): void {
   const { name, setup, teardown } = options;
@@ -163,6 +191,23 @@ export function runAdapterConformance(options: AdapterConformanceOptions): void 
       });
     });
 
+    it('sends exactly one subscribe frame per subId when subscribing before open', async () => {
+      await withHarness(async (h) => {
+        const subs: SubscribeRequest[] = [
+          { subId: 'sub_1', channel: 'orders' },
+          { subId: 'sub_2', channel: 'trades', params: { symbol: 'ACME' } },
+        ];
+        for (const sub of subs) h.adapter.subscribe(sub); // subscribe BEFORE the link is open
+        await h.open(); // the adapter replays its active set on open
+
+        const counts = countBySubId(h.sentSubscribes());
+        for (const sub of subs) {
+          // exactly once: not lost (>=1) and not duplicated by an eager push + reopen replay
+          expect(counts.get(sub.subId)).toBe(1);
+        }
+      });
+    });
+
     it('surfaces an inbound server event as a normalized onEvent', async () => {
       await withHarness(async (h, rec) => {
         await h.open();
@@ -175,6 +220,36 @@ export function runAdapterConformance(options: AdapterConformanceOptions): void 
         };
         await h.emit(event);
         expect(rec.events).toEqual([event]);
+      });
+    });
+
+    it('routes events by channel with no cross-talk', async () => {
+      await withHarness(async (h, rec) => {
+        await h.open();
+        h.adapter.subscribe({ subId: 'sub_a', channel: 'A' });
+        h.adapter.subscribe({ subId: 'sub_b', channel: 'B' });
+
+        const onA: NormalizedEvent = { channel: 'A', event: 'update', payload: 1 };
+        await h.emit(onA);
+        expect(rec.events).toEqual([onA]); // fired once, carrying channel 'A'
+
+        const onB: NormalizedEvent = { channel: 'B', event: 'update', payload: 2 };
+        await h.emit(onB);
+        expect(rec.events).toEqual([onA, onB]); // one more, carrying channel 'B' — no A duplicate
+      });
+    });
+
+    it('preserves the order of inbound events', async () => {
+      await withHarness(async (h, rec) => {
+        await h.open();
+        h.adapter.subscribe({ subId: 'sub_1', channel: 'orders' });
+        const ordered: NormalizedEvent[] = [
+          { channel: 'orders', event: 'a', payload: 1 },
+          { channel: 'orders', event: 'b', payload: 2 },
+          { channel: 'orders', event: 'c', payload: 3 },
+        ];
+        for (const event of ordered) await h.emit(event);
+        expect(rec.events).toEqual(ordered);
       });
     });
 
@@ -193,13 +268,32 @@ export function runAdapterConformance(options: AdapterConformanceOptions): void 
       });
     });
 
-    it('reconnects after an unexpected drop and re-subscribes the active set', async () => {
+    it('treats an unknown or already-removed unsubscribe as a no-op', async () => {
+      await withHarness(async (h) => {
+        await h.open();
+        // never subscribed → no throw and no spurious frame
+        expect(() => h.adapter.unsubscribe('never-subscribed')).not.toThrow();
+        expect(h.sentUnsubscribes()).toEqual([]);
+
+        h.adapter.subscribe({ subId: 'sub_1', channel: 'orders' });
+        h.adapter.unsubscribe('sub_1');
+        expect(h.sentUnsubscribes()).toEqual(['sub_1']);
+
+        // already removed → still exactly one frame, no throw
+        expect(() => h.adapter.unsubscribe('sub_1')).not.toThrow();
+        expect(h.sentUnsubscribes()).toEqual(['sub_1']);
+      });
+    });
+
+    it('reconnects after an unexpected drop and replays each active sub exactly once', async () => {
       await withHarness(async (h, rec) => {
         await h.open();
-        const subs: SubscribeRequest[] = [
-          { subId: 'sub_1', channel: 'orders' },
-          { subId: 'sub_2', channel: 'trades', params: { symbol: 'ACME' } },
-        ];
+        // Scale up so a per-sub double-replay bug can't hide behind a lenient count.
+        const subs: SubscribeRequest[] = Array.from({ length: 20 }, (_, i) => ({
+          subId: `sub_${i + 1}`,
+          channel: `channel_${i + 1}`,
+          params: { i },
+        }));
         for (const sub of subs) h.adapter.subscribe(sub);
 
         await h.drop('network-loss');
@@ -211,7 +305,8 @@ export function runAdapterConformance(options: AdapterConformanceOptions): void 
         await h.open();
 
         const replayed = countBySubId(h.sentSubscribes().slice(before));
-        for (const sub of subs) expect(replayed.get(sub.subId) ?? 0).toBeGreaterThanOrEqual(1);
+        expect(replayed.size).toBe(subs.length); // every active sub replayed, and only those
+        for (const sub of subs) expect(replayed.get(sub.subId)).toBe(1); // exactly once each
       });
     });
 
@@ -229,6 +324,31 @@ export function runAdapterConformance(options: AdapterConformanceOptions): void 
           { subId: 'sub_1', cursor: 'cursor-1' },
           { subId: 'sub_1', cursor: null },
         ]);
+      });
+    });
+
+    it('surfaces a transport error through onError when the harness can inject one', async () => {
+      await withHarness(async (h, rec) => {
+        if (typeof h.fail !== 'function') return; // seam absent → skip
+        await h.open();
+        const err = new Error('transport-boom');
+        await h.fail(err);
+        expect(rec.errors).toBe(1);
+        expect(rec.errorValues).toEqual([err]); // the exact value flows through
+      });
+    });
+
+    it('emits one keepalive per heartbeat while open, and none while closed', async () => {
+      await withHarness(async (h) => {
+        const heartbeat = h.adapter.heartbeat;
+        if (typeof heartbeat !== 'function' || typeof h.sentHeartbeats !== 'function') return; // skip
+        heartbeat.call(h.adapter); // not open yet
+        expect(h.sentHeartbeats()).toBe(0); // no keepalive on a closed link
+
+        await h.open();
+        heartbeat.call(h.adapter);
+        heartbeat.call(h.adapter);
+        expect(h.sentHeartbeats()).toBe(2); // one wire keepalive per heartbeat() while open
       });
     });
 

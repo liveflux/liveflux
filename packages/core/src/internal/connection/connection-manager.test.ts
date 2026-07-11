@@ -29,6 +29,9 @@ class MockAdapter implements StreamAdapter {
   drop(): void {
     this.handlers?.onClose();
   }
+  fail(err: unknown): void {
+    this.handlers?.onError(err);
+  }
 }
 
 describe('ConnectionManager', () => {
@@ -118,5 +121,99 @@ describe('ConnectionManager', () => {
     cm.close();
     vi.advanceTimersByTime(3000);
     expect(adapter.heartbeats).toBe(3); // stopped
+  });
+
+  it('a duplicate onOpen does not leak a second heartbeat interval', () => {
+    const adapter = new MockAdapter();
+    const cm = new ConnectionManager({ adapter, heartbeat: { enabled: true, intervalMs: 1000 } });
+    cm.connect();
+
+    adapter.open();
+    adapter.open(); // stray/duplicate open — must not start a second interval
+
+    // With one interval, 3s → 3 ticks. A leaked second interval would double this to 6.
+    vi.advanceTimersByTime(3000);
+    expect(adapter.heartbeats).toBe(3);
+
+    // And a single stopHeartbeat still fully halts it (proves there's only one live timer).
+    cm.close();
+    vi.advanceTimersByTime(3000);
+    expect(adapter.heartbeats).toBe(3);
+  });
+
+  it('a duplicate onClose schedules exactly one reconnect (not two concurrent opens)', () => {
+    const adapter = new MockAdapter();
+    const cm = new ConnectionManager({ adapter, random: () => 0.5 });
+    cm.connect();
+    adapter.open();
+    expect(adapter.connectCalls).toBe(1);
+
+    adapter.drop();
+    adapter.drop(); // duplicate close while a reconnect is already pending
+    expect(cm.getState()).toBe('reconnecting');
+
+    vi.advanceTimersByTime(500); // one backoff elapses
+    expect(adapter.connectCalls).toBe(2); // exactly one reopen, not two
+  });
+
+  it('ignores an onOpen that arrives after close() — stays closed, no heartbeat restart', () => {
+    const adapter = new MockAdapter();
+    const cm = new ConnectionManager({ adapter, heartbeat: { enabled: true, intervalMs: 1000 } });
+    cm.connect();
+    adapter.open();
+
+    cm.close();
+    expect(cm.getState()).toBe('closed');
+
+    adapter.open(); // stray open after teardown — must not resurrect the client
+    expect(cm.getState()).toBe('closed');
+
+    vi.advanceTimersByTime(3000);
+    expect(adapter.heartbeats).toBe(0); // heartbeat never restarted
+  });
+
+  it('surfaces an adapter error to onError listeners, isolating a throwing listener', () => {
+    const adapter = new MockAdapter();
+    const cm = new ConnectionManager({ adapter });
+    cm.connect();
+
+    // Capture the async rethrow so it doesn't escape as an uncaught exception, and assert it.
+    const microtasks: Array<() => void> = [];
+    const mt = vi.spyOn(globalThis, 'queueMicrotask').mockImplementation((cb) => {
+      microtasks.push(cb);
+    });
+
+    const seen: unknown[] = [];
+    const throwing = vi.fn(() => {
+      throw new Error('listener boom');
+    });
+    cm.onError(throwing); // a bad listener must not starve the others
+    cm.onError((err) => seen.push(err));
+
+    const boom = new Error('socket boom');
+    adapter.fail(boom);
+
+    expect(throwing).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual([boom]); // the second listener still received it despite the first throwing
+
+    // The throwing listener's error is resurfaced asynchronously, never swallowed.
+    expect(microtasks).toHaveLength(1);
+    const [resurface] = microtasks;
+    expect(() => resurface?.()).toThrow('listener boom');
+    mt.mockRestore();
+  });
+
+  it('onError unsubscribe stops further delivery', () => {
+    const adapter = new MockAdapter();
+    const cm = new ConnectionManager({ adapter });
+    cm.connect();
+
+    const seen: unknown[] = [];
+    const off = cm.onError((err) => seen.push(err));
+    adapter.fail('a');
+    off();
+    adapter.fail('b');
+
+    expect(seen).toEqual(['a']);
   });
 });

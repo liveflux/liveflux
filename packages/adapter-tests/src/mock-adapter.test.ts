@@ -159,9 +159,12 @@ runAdapterConformance({
       open: () => adapter.open(),
       emit: (event) => adapter.emit(event),
       drop: (reason) => adapter.drop(reason),
+      fail: (err) => adapter.fail(err),
       sentSubscribes: () => adapter.subscribeLog,
       sentUnsubscribes: () => adapter.unsubscribeLog,
       sentResumes: () => adapter.resumeLog,
+      // No `sentHeartbeats`: MockAdapter counts heartbeat() requests, it models no wire keepalive
+      // frame, so the keepalive scenario is skipped for the self-check.
     };
   },
 });
