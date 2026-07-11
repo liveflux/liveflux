@@ -77,15 +77,14 @@ export class MockAdapter implements StreamAdapter {
   }
 
   unsubscribe(subId: string): void {
-    this.#unsubscribeLog.push(subId);
     const sub = this.#active.get(subId);
-    if (sub) {
-      this.#active.delete(subId);
-      const channelSubs = this.#byChannel.get(sub.channel);
-      if (channelSubs) {
-        channelSubs.delete(subId);
-        if (channelSubs.size === 0) this.#byChannel.delete(sub.channel);
-      }
+    if (!sub) return; // idempotent: an unknown / already-removed subId sends no wire frame
+    this.#unsubscribeLog.push(subId);
+    this.#active.delete(subId);
+    const channelSubs = this.#byChannel.get(sub.channel);
+    if (channelSubs) {
+      channelSubs.delete(subId);
+      if (channelSubs.size === 0) this.#byChannel.delete(sub.channel);
     }
     this.#cursors.delete(subId);
   }
@@ -103,6 +102,7 @@ export class MockAdapter implements StreamAdapter {
   /** Complete the connection handshake: fire `onOpen` and replay the active subscription set. */
   open(): void {
     const handlers = this.#requireHandlers('open');
+    if (this.#open) return; // idempotent: a second open() on an already-open link is a no-op
     this.#open = true;
     // Replay active subs first (the server learns them on (re)open), then signal open — the same
     // order a real adapter uses so a reconnect re-subscribes before anything else runs.

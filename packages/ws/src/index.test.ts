@@ -230,6 +230,48 @@ describe('ws adapter', () => {
     }
   });
 
+  it('sends a pre-open subscribe exactly once on open (no eager-push + replay duplication)', () => {
+    const adapter = ws('wss://x', { WebSocket: MockCtor });
+    adapter.connect(handlers());
+    adapter.subscribe({ subId: 's1', channel: 'trades' }); // before open → held, not pushed
+    expect(last().sent).toHaveLength(0);
+    last().open(); // onopen replays the active set
+    const subscribes = last().sent.filter((raw) => JSON.parse(raw).type === 'subscribe');
+    expect(subscribes).toHaveLength(1); // exactly one frame for s1, not two
+    expect(JSON.parse(subscribes[0]!)).toEqual({ type: 'subscribe', subId: 's1', channel: 'trades' });
+  });
+
+  it('treats an unknown or already-removed unsubscribe as a no-op (no frame)', () => {
+    const adapter = ws('wss://x', { WebSocket: MockCtor });
+    adapter.connect(handlers());
+    last().open();
+    adapter.unsubscribe('never'); // unknown subId → nothing on the wire
+    expect(last().sent).toHaveLength(0);
+
+    adapter.subscribe({ subId: 's1', channel: 'trades' });
+    adapter.unsubscribe('s1');
+    adapter.unsubscribe('s1'); // already removed → still just the one unsubscribe frame
+    const unsubs = last().sent.filter((raw) => JSON.parse(raw).type === 'unsubscribe');
+    expect(unsubs).toHaveLength(1);
+    expect(JSON.parse(unsubs[0]!)).toEqual({ type: 'unsubscribe', subId: 's1' });
+  });
+
+  it('re-resolves a function url (and protocols) on every (re)connect', () => {
+    let token = 'token-1';
+    const adapter = ws(() => `wss://x?token=${token}`, {
+      WebSocket: MockCtor,
+      protocols: () => [`bearer.${token}`],
+    });
+    adapter.connect(handlers());
+    expect(last().url).toBe('wss://x?token=token-1');
+    expect(last().protocols).toEqual(['bearer.token-1']);
+
+    token = 'token-2'; // token rotates before the reconnect
+    adapter.connect(handlers()); // reconnect re-resolves both
+    expect(last().url).toBe('wss://x?token=token-2');
+    expect(last().protocols).toEqual(['bearer.token-2']);
+  });
+
   it('supports a custom decode', () => {
     const adapter = ws('wss://x', {
       WebSocket: MockCtor,

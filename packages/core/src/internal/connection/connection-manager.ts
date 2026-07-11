@@ -25,6 +25,12 @@ export interface ConnectionManagerOptions {
 }
 
 type StateListener = (state: ConnectionState, previous: ConnectionState) => void;
+type ErrorListener = (err: unknown) => void;
+
+/** Best-effort `unref` so a pending timer never keeps a Node/SSR process alive. No-op in browsers. */
+function unref(timer: ReturnType<typeof setTimeout>): void {
+  (timer as unknown as { unref?: () => void }).unref?.();
+}
 
 /**
  * Owns a StreamAdapter's connection lifecycle: connect/close, automatic backoff reconnection,
@@ -45,6 +51,7 @@ export class ConnectionManager {
   #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   #heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   readonly #listeners = new Set<StateListener>();
+  readonly #errorListeners = new Set<ErrorListener>();
 
   constructor(opts: ConnectionManagerOptions) {
     this.#adapter = opts.adapter;
@@ -75,6 +82,14 @@ export class ConnectionManager {
     };
   }
 
+  /** Subscribe to adapter/connection errors. Returns an unsubscribe function. */
+  onError(listener: ErrorListener): () => void {
+    this.#errorListeners.add(listener);
+    return () => {
+      this.#errorListeners.delete(listener);
+    };
+  }
+
   /** Open the connection. No-op while already connecting/open. */
   connect(): void {
     if (this.#state === 'connecting' || this.#state === 'open') return;
@@ -98,9 +113,7 @@ export class ConnectionManager {
     const handlers: AdapterHandlers = {
       onOpen: () => this.#handleOpen(),
       onClose: () => this.#handleClose(),
-      onError: () => {
-        /* errors surface via observability later; the ensuing close drives reconnect */
-      },
+      onError: (err) => this.#emitError(err),
       onEvent: (event) => {
         this.#onEvent?.(event);
       },
@@ -109,21 +122,23 @@ export class ConnectionManager {
   }
 
   #handleOpen(): void {
+    // Ignore a stray open after teardown — it must not resurrect a closed client or its heartbeat.
+    if (this.#manualClose || this.#state === 'closed') return;
     this.#attempts = 0;
     this.#setState('open');
     this.#startHeartbeat();
   }
 
   #handleClose(): void {
+    // Ignore stray/duplicate closes: after teardown, or while a reconnect is already pending
+    // (a live backoff timer). A close during an in-flight reopen attempt (timer null) is legitimate.
+    if (this.#manualClose || this.#state === 'closed' || this.#reconnectTimer !== null) return;
     this.#stopHeartbeat();
-    if (this.#manualClose) {
-      this.#setState('closed');
-      return;
-    }
     this.#scheduleReconnect();
   }
 
   #scheduleReconnect(): void {
+    if (this.#reconnectTimer !== null) return; // a reconnect is already pending — never double up
     if (!this.#reconnect.enabled || this.#attempts >= this.#reconnect.maxAttempts) {
       this.#setState('closed');
       return;
@@ -131,15 +146,21 @@ export class ConnectionManager {
     this.#attempts += 1;
     const delay = backoffDelay(this.#attempts, this.#reconnect, this.#random);
     this.#setState('reconnecting');
-    this.#reconnectTimer = setTimeout(() => {
+    const timer = setTimeout(() => {
       this.#reconnectTimer = null;
       this.#openAdapter();
     }, delay);
+    this.#reconnectTimer = timer;
+    unref(timer);
   }
 
   #startHeartbeat(): void {
     if (!this.#heartbeat.enabled || !this.#adapter.heartbeat) return;
-    this.#heartbeatTimer = setInterval(() => this.#adapter.heartbeat?.(), this.#heartbeat.intervalMs);
+    // Stop-then-start: a duplicate onOpen must never leak a second, orphaned interval.
+    this.#stopHeartbeat();
+    const timer = setInterval(() => this.#adapter.heartbeat?.(), this.#heartbeat.intervalMs);
+    this.#heartbeatTimer = timer;
+    unref(timer);
   }
 
   #stopHeartbeat(): void {
@@ -170,6 +191,20 @@ export class ConnectionManager {
         // without breaking the synchronous dispatch loop.
         queueMicrotask(() => {
           throw err;
+        });
+      }
+    }
+  }
+
+  /** Fan an adapter/connection error out to listeners, isolating a throwing listener from the rest. */
+  #emitError(err: unknown): void {
+    // Snapshot so a listener that (un)subscribes during dispatch can't corrupt iteration.
+    for (const listener of [...this.#errorListeners]) {
+      try {
+        listener(err);
+      } catch (e) {
+        queueMicrotask(() => {
+          throw e;
         });
       }
     }
