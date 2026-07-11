@@ -40,21 +40,31 @@ class FakeWebSocket {
 }
 
 /**
+ * Recover the `subId` from a composite `join_ref` (`` `${subId}#${instance}` ``). The adapter mints
+ * a fresh join instance per join so a superseded channel's late frames can be filtered, but the
+ * `subId` — what the core speaks — is the part before the last `#`.
+ */
+function recoverSubId(joinRef: string): string {
+  const i = joinRef.lastIndexOf('#');
+  return i < 0 ? joinRef : joinRef.slice(0, i);
+}
+
+/**
  * Decode a captured `phx_join` frame back to the transport-neutral `SubscribeRequest` the core
- * speaks. The adapter uses the `subId` verbatim as the topic's `join_ref`, so it is recovered from
- * the frame's first element; the topic is the `channel`; a non-empty join payload is the `params`.
+ * speaks. The `subId` is recovered from the composite `join_ref` in the frame's first element; the
+ * topic is the `channel`; a non-empty join payload is the `params`.
  */
 function joinFrame(raw: string): SubscribeRequest | null {
   const [joinRef, , topic, event, payload] = JSON.parse(raw) as PhoenixMessage;
   if (event !== 'phx_join' || joinRef === null) return null;
   const params = payload as Record<string, unknown>;
   const hasParams = params != null && Object.keys(params).length > 0;
-  return { subId: joinRef, channel: topic, ...(hasParams ? { params } : {}) };
+  return { subId: recoverSubId(joinRef), channel: topic, ...(hasParams ? { params } : {}) };
 }
 
 function leaveSubId(raw: string): string | null {
   const [joinRef, , , event] = JSON.parse(raw) as PhoenixMessage;
-  return event === 'phx_leave' ? joinRef : null;
+  return event === 'phx_leave' && joinRef !== null ? recoverSubId(joinRef) : null;
 }
 
 /**
