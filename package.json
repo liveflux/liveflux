@@ -19,6 +19,7 @@
     "test": "turbo run test",
     "size": "turbo run size",
     "check": "turbo run typecheck test build size",
+    "e2e": "turbo run e2e --filter=e2e",
     "format": "prettier --write .",
     "ship": "bash scripts/ship.sh"
   },
