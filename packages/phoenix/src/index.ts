@@ -6,6 +6,22 @@ import type {
 } from '@liveflux/core';
 import { Outbox, type Sink } from './internal/outbox';
 
+/** Host `setTimeout`/`clearTimeout` without pulling in DOM/Node lib types. */
+const timers = globalThis as {
+  setTimeout(cb: () => void, ms: number): unknown;
+  clearTimeout(handle: unknown): void;
+};
+
+/**
+ * Arm a one-shot timer and `unref` it where supported (Node) so a background join/rejoin timer
+ * never keeps a process alive on its own. A no-op cast in the browser, where the handle is a number.
+ */
+function arm(ms: number, cb: () => void): unknown {
+  const handle = timers.setTimeout(cb, ms);
+  (handle as { unref?: () => void }).unref?.();
+  return handle;
+}
+
 /** A minimal WebSocket-like object (browser WebSocket, Node `ws`, or a test double). */
 interface WebSocketLike {
   send(data: string): void;
@@ -45,8 +61,12 @@ export interface PhoenixOptions {
   /**
    * Socket-level connect params appended to the URL query string (e.g. an auth token the Phoenix
    * `connect/3` callback reads). Carried, never invented — Liveflux passes through the app's scheme.
+   *
+   * Pass a **function** to have it re-invoked on every `connect()` (including reconnects), so a
+   * rotated/refreshed auth token is picked up on each new socket. A plain object is read once per
+   * connect, exactly as before.
    */
-  params?: Record<string, string>;
+  params?: Record<string, string> | (() => Record<string, string>);
   /** Serializer version negotiated via the `vsn` query param. Default: `"2.0.0"` (the v2 serializer). */
   vsn?: string;
   /** Encode an outbound Phoenix message to a wire string. Default: `JSON.stringify`. */
@@ -65,11 +85,25 @@ export interface PhoenixOptions {
    */
   maxBufferedAmount?: number;
   /**
-   * Security guard: drop inbound string frames longer than this (approx. bytes, measured as string
-   * length) before parsing — bounds memory/CPU from a malicious or buggy server. Set `0` (or a
-   * non-positive value) to disable. Default: 1 MiB.
+   * Security guard: drop inbound string frames longer than this (measured as UTF-16 string length,
+   * an approximation of bytes) before parsing — bounds memory/CPU from a malicious or buggy server.
+   * Set `0` (or a non-positive value) to disable. Default: 1 MiB.
    */
   maxMessageBytes?: number;
+  /**
+   * Per-join reply timeout (ms). A `phx_join` with no `phx_reply` within this window is treated as
+   * lost: its pending entry is cleared (no leak) and the join is retried with capped backoff.
+   * Default: 10000.
+   */
+  joinTimeoutMs?: number;
+  /**
+   * Base delay (ms) before re-joining a channel after a `phx_error` or a join timeout. Doubles per
+   * consecutive attempt (capped by `maxRejoinDelayMs`) so a crash-looping channel cannot hot-spin;
+   * the counter resets on a successful join. Default: 50.
+   */
+  rejoinDelayMs?: number;
+  /** Cap (ms) for the exponential re-join backoff. Default: 5000. */
+  maxRejoinDelayMs?: number;
   /** WebSocket constructor. Default: `globalThis.WebSocket`. Inject for Node or tests. */
   WebSocket?: WebSocketCtor;
 }
@@ -78,6 +112,9 @@ const OPEN = 1; // WebSocket.OPEN
 const DEFAULT_VSN = '2.0.0';
 const DEFAULT_MAX_BUFFERED = 1_048_576; // 1 MiB
 const DEFAULT_MAX_MESSAGE = 1_048_576; // 1 MiB
+const DEFAULT_JOIN_TIMEOUT = 10_000;
+const DEFAULT_REJOIN_DELAY = 50;
+const DEFAULT_MAX_REJOIN_DELAY = 5_000;
 const FLUSH_POLL_MS = 16;
 
 // Phoenix protocol events. The socket-level keepalive rides the reserved `phoenix` topic.
@@ -93,6 +130,18 @@ const HEARTBEAT_TOPIC = 'phoenix';
 interface Active {
   topic: string;
   params?: Record<string, unknown>;
+}
+
+/** A join awaiting its reply: which sub/topic it belongs to, and its per-join timeout handle. */
+interface PendingJoin {
+  subId: string;
+  topic: string;
+  timer: unknown;
+}
+
+/** Clamp to a positive number, else fall back to a default (guards 0 / NaN / negative inputs). */
+function positive(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && value > 0 ? value : fallback;
 }
 
 /** Build the socket URL with the negotiated serializer version and any connect params. */
@@ -133,21 +182,35 @@ function isErrorReply(payload: unknown): boolean {
   );
 }
 
+/** Recover the `subId` from a composite `join_ref` of the form `` `${subId}#${instance}` ``. */
+function subIdOf(joinRef: string): string {
+  const i = joinRef.lastIndexOf('#');
+  return i < 0 ? joinRef : joinRef.slice(0, i);
+}
+
 /**
  * Phoenix Channels adapter for `@liveflux/core`. Speaks the hand-rolled Phoenix **v2** serializer —
  * each message is a JSON array `[join_ref, ref, topic, event, payload]` — with **zero runtime
  * dependencies** (it does not use the `phoenix` npm package).
  *
- * Mapping to the core contract: a Liveflux `channel` is a Phoenix topic; a `subId` is used verbatim
- * as that topic's `join_ref` — a stable, opaque per-subscription join token that makes replies
- * self-correlating and needs no side table. `ref` is a monotonic per-connection counter; both `ref`
- * and the pending-join table reset on every (re)connect, while the active subscription set (the
+ * Mapping to the core contract: a Liveflux `channel` is a Phoenix topic; each join instance gets a
+ * **fresh composite `join_ref`** `` `${subId}#${instance}` `` — recoverable to its `subId`, but
+ * distinct per join so a late frame from a superseded channel instance (after a same-socket rejoin)
+ * can be told apart from the live one and dropped. `ref` is a monotonic per-connection counter; both
+ * `ref` and the pending-join table reset on every (re)connect, while the active subscription set (the
  * source of truth for reconnect) persists and is re-joined on each reopen — satisfying reconnect
  * recovery without the core ever calling `subscribe` again.
  *
- * Scales by design: one socket multiplexes every subscription (ref-counted upstream in core),
- * subscribe / unsubscribe are O(1), and outbound backpressure plus the memory-lean send queue are
- * encapsulated in an internal Outbox (see `maxBufferedAmount`).
+ * Resilience: a `phx_error` transparently re-joins the crashed channel (capped exponential backoff,
+ * mirroring `phoenix.js`); a `phx_join` with no reply within `joinTimeoutMs` is retried the same way;
+ * and a heartbeat that is still unacked on the next `heartbeat()` tick closes the zombie socket so
+ * the core reconnects. Stale lifecycle frames (a non-null `join_ref` that no longer matches the
+ * current instance) are ignored.
+ *
+ * Scales by design: one socket multiplexes every subscription (ref-counted upstream in core), and
+ * inbound routing is **O(1)** — a per-topic reference count answers "is this topic active?" without
+ * scanning the subscription set. Subscribe / unsubscribe are O(1), and outbound backpressure plus the
+ * memory-lean send queue are encapsulated in an internal Outbox (see `maxBufferedAmount`).
  *
  * Security: inbound is untrusted. String frames over `maxMessageBytes` are dropped before parsing
  * (DoS bound); only strict five-tuples with string `topic` / `event` are accepted, and those route
@@ -162,25 +225,36 @@ export function phoenix(url: string, options: PhoenixOptions = {}): StreamAdapte
   const maxBuffered = options.maxBufferedAmount ?? DEFAULT_MAX_BUFFERED;
   const rawMaxMessage = options.maxMessageBytes ?? DEFAULT_MAX_MESSAGE;
   const messageLimit = rawMaxMessage > 0 ? rawMaxMessage : Infinity; // <= 0 disables the cap
+  const joinTimeoutMs = positive(options.joinTimeoutMs, DEFAULT_JOIN_TIMEOUT);
+  const rejoinDelayMs = positive(options.rejoinDelayMs, DEFAULT_REJOIN_DELAY);
+  const maxRejoinDelayMs = positive(options.maxRejoinDelayMs, DEFAULT_MAX_REJOIN_DELAY);
   // One boundary cast: the DOM WebSocket's strict event types don't match our minimal shape.
   const Ctor =
     options.WebSocket ??
     ((globalThis as { WebSocket?: unknown }).WebSocket as WebSocketCtor | undefined);
-  const target = connectUrl(url, vsn, options.params);
 
   let socket: WebSocketLike | null = null;
+  let handlers: AdapterHandlers | null = null;
   // subId → topic + join params. The source of truth replayed (re-joined) on every reopen.
   const active = new Map<string, Active>();
-  // Per-connection request/reply correlation for joins, so a rejected join surfaces via onError.
-  const pendingJoins = new Map<string, string>(); // ref → topic
+  // topic → number of active subs on it. Makes inbound topic routing O(1) (no scan of `active`).
+  const topicCount = new Map<string, number>();
+  // subId → the join_ref of its current (live) join instance. Late frames from an older instance
+  // are filtered against this.
+  const currentJoinRef = new Map<string, string>();
+  // ref → the join awaiting this reply (with its per-join timeout). Reset on every (re)connect.
+  const pendingJoins = new Map<string, PendingJoin>();
+  // subId → a scheduled re-join timer (after a phx_error / join timeout). Dedupes rapid triggers.
+  const rejoinTimers = new Map<string, unknown>();
+  // subId → consecutive re-join attempts, driving the exponential backoff; reset on a healthy join.
+  const rejoinAttempts = new Map<string, number>();
   let refCounter = 0;
+  let joinInstance = 0; // mints a fresh join_ref per join; restarts each connection (new socket)
+  let heartbeatRef: string | null = null; // outstanding heartbeat ref, or null if acked / none sent
 
   const nextRef = (): string => String(++refCounter);
   const isOpen = (): boolean => socket !== null && socket.readyState === OPEN;
-  const hasActiveTopic = (topic: string): boolean => {
-    for (const entry of active.values()) if (entry.topic === topic) return true;
-    return false;
-  };
+  const hasActiveTopic = (topic: string): boolean => topicCount.has(topic);
 
   const safeSend = (s: WebSocketLike, data: string): void => {
     try {
@@ -204,14 +278,48 @@ export function phoenix(url: string, options: PhoenixOptions = {}): StreamAdapte
   };
   const outbox = new Outbox(sink, FLUSH_POLL_MS);
 
-  // Send a `phx_join` for one active sub, using its subId as the topic's join_ref and a fresh ref
-  // recorded so the matching reply can be correlated. Called on subscribe (when open) and on reopen.
+  // Send a `phx_join` for one active sub: mint a fresh composite join_ref (recorded as the sub's
+  // current instance), record the pending reply with a per-join timeout, and enqueue the frame.
+  // Called on subscribe (when open), on reopen, and on a backed-off re-join.
   const sendJoin = (subId: string): void => {
     const entry = active.get(subId);
     if (!entry) return;
+    const joinRef = `${subId}#${++joinInstance}`;
+    currentJoinRef.set(subId, joinRef);
     const ref = nextRef();
-    pendingJoins.set(ref, entry.topic);
-    outbox.push(encode([subId, ref, entry.topic, JOIN, entry.params ?? {}]));
+    const timer = arm(joinTimeoutMs, () => {
+      if (!pendingJoins.has(ref)) return; // already answered
+      pendingJoins.delete(ref); // plug the bounded leak
+      scheduleRejoin(subId); // retry the join with capped backoff
+    });
+    pendingJoins.set(ref, { subId, topic: entry.topic, timer });
+    outbox.push(encode([joinRef, ref, entry.topic, JOIN, entry.params ?? {}]));
+  };
+
+  // Re-join a sub after a channel error or a join timeout, spaced by exponential backoff (capped) so
+  // a crash-looping channel cannot hot-spin. Deduped per sub; the attempt counter resets on success.
+  const scheduleRejoin = (subId: string): void => {
+    if (rejoinTimers.has(subId) || !active.has(subId)) return;
+    const step = rejoinAttempts.get(subId) ?? 0;
+    rejoinAttempts.set(subId, step + 1);
+    const delay = Math.min(rejoinDelayMs * 2 ** step, maxRejoinDelayMs);
+    const timer = arm(delay, () => {
+      rejoinTimers.delete(subId);
+      if (isOpen()) sendJoin(subId); // otherwise the next onOpen replays the whole active set
+    });
+    rejoinTimers.set(subId, timer);
+  };
+
+  // Drop all per-connection timers/state. Called on (re)connect and teardown; the active set (the
+  // reconnect source of truth) is left intact.
+  const clearTransient = (): void => {
+    for (const p of pendingJoins.values()) timers.clearTimeout(p.timer);
+    pendingJoins.clear();
+    for (const t of rejoinTimers.values()) timers.clearTimeout(t);
+    rejoinTimers.clear();
+    rejoinAttempts.clear();
+    currentJoinRef.clear();
+    heartbeatRef = null;
   };
 
   const retire = (s: WebSocketLike): void => {
@@ -223,8 +331,62 @@ export function phoenix(url: string, options: PhoenixOptions = {}): StreamAdapte
     }
   };
 
+  const onMessage = (raw: unknown): void => {
+    const h = handlers;
+    if (!h) return;
+    // Transport-level DoS guard: drop oversized string frames before parsing.
+    if (typeof raw === 'string' && raw.length > messageLimit) return;
+    const message = parseMessage(raw);
+    if (!message) return;
+    const [joinRef, ref, topic, event] = message;
+
+    if (event === REPLY) {
+      // Socket-level heartbeat ack: clears the outstanding heartbeat so the next tick is not read as
+      // a dead link. Carries a null join_ref, so it never reaches the join-correlation path below.
+      if (topic === HEARTBEAT_TOPIC) {
+        if (ref !== null && ref === heartbeatRef) heartbeatRef = null;
+        return;
+      }
+      // Correlate a reply to its pending join by ref; a rejected join is surfaced, an ok join resets
+      // the topic's re-join backoff, any other reply is silently consumed.
+      if (ref === null) return;
+      const pending = pendingJoins.get(ref);
+      if (pending === undefined) return;
+      timers.clearTimeout(pending.timer);
+      pendingJoins.delete(ref);
+      // Stale-instance filter: a newer join for this sub has superseded this in-flight one → ignore
+      // its late reply so it neither fires an error nor resets the live instance's backoff.
+      if (joinRef !== null && currentJoinRef.get(pending.subId) !== joinRef) return;
+      if (isErrorReply(message[4])) {
+        handlers?.onError({ type: 'join_error', channel: pending.topic, reply: message[4] });
+      } else {
+        rejoinAttempts.delete(pending.subId);
+      }
+      return;
+    }
+
+    if (event === ERROR) {
+      // Ignore a phx_error from a superseded join instance (its join_ref is no longer current).
+      if (joinRef !== null && currentJoinRef.get(subIdOf(joinRef)) !== joinRef) return;
+      if (!hasActiveTopic(topic)) return;
+      // Surface for observability, then transparently re-join every active sub on the crashed topic
+      // (with backoff), mirroring the real phoenix.js client — the sub is not left permanently dead.
+      h.onError({ type: 'channel_error', channel: topic });
+      for (const [subId, e] of active) if (e.topic === topic) scheduleRejoin(subId);
+      return;
+    }
+
+    if (event === CLOSE) return; // graceful close after a leave (or a superseded instance) — no action
+
+    // A data event (join_ref is null on broadcasts): deliver once per active topic (core fans out to
+    // every listener on that channel).
+    if (!hasActiveTopic(topic)) return;
+    const normalized = decode(message);
+    if (normalized) h.onEvent(normalized);
+  };
+
   return Object.freeze<StreamAdapter>({
-    connect(handlers: AdapterHandlers): void {
+    connect(nextHandlers: AdapterHandlers): void {
       if (!Ctor) {
         throw new Error(
           '@liveflux/phoenix: no WebSocket implementation found — pass options.WebSocket.',
@@ -233,56 +395,29 @@ export function phoenix(url: string, options: PhoenixOptions = {}): StreamAdapte
       // Fully retire any prior socket so a reconnect never leaves a dangling connection behind.
       if (socket) retire(socket);
       outbox.reset(); // drop stale pending; `active` is the source of truth on (re)connect
-      pendingJoins.clear();
+      clearTransient();
       refCounter = 0; // refs are per-connection; the fresh socket starts its own sequence
-      const s = new Ctor(target);
+      joinInstance = 0; // join instances restart per socket — no cross-socket join_ref collisions
+      handlers = nextHandlers;
+      // Re-read connect params on every connect so a params *function* re-auths each new socket.
+      const params = typeof options.params === 'function' ? options.params() : options.params;
+      const s = new Ctor(connectUrl(url, vsn, params));
       socket = s;
       s.onopen = () => {
         for (const subId of active.keys()) sendJoin(subId); // re-join the active set on every open
-        handlers.onOpen();
+        nextHandlers.onOpen();
       };
-      s.onclose = (ev) => handlers.onClose(ev);
-      s.onerror = (ev) => handlers.onError(ev);
-      s.onmessage = (ev) => {
-        const raw = ev.data;
-        // Transport-level DoS guard: drop oversized string frames before parsing.
-        if (typeof raw === 'string' && raw.length > messageLimit) return;
-        const message = parseMessage(raw);
-        if (!message) return;
-        const [, ref, topic, event] = message;
-
-        if (event === REPLY) {
-          // Correlate a reply to its pending join; a rejected join is surfaced, an ok join / any
-          // other reply (leaves, heartbeats) is silently consumed.
-          if (ref === null) return;
-          const joinTopic = pendingJoins.get(ref);
-          if (joinTopic === undefined) return;
-          pendingJoins.delete(ref);
-          if (isErrorReply(message[4])) {
-            handlers.onError({ type: 'join_error', channel: joinTopic, reply: message[4] });
-          }
-          return;
-        }
-        if (event === ERROR) {
-          // The channel crashed server-side. Surface it (core owns connection-level reconnect);
-          // channel-level rejoin with backoff is a deliberate future increment.
-          if (hasActiveTopic(topic)) handlers.onError({ type: 'channel_error', channel: topic });
-          return;
-        }
-        if (event === CLOSE) return; // graceful close after a leave — nothing to do
-
-        // A data event: deliver once per topic (core fans out to every listener on that channel).
-        if (!hasActiveTopic(topic)) return;
-        const normalized = decode(message);
-        if (normalized) handlers.onEvent(normalized);
-      };
+      s.onclose = (ev) => nextHandlers.onClose(ev);
+      s.onerror = (ev) => nextHandlers.onError(ev);
+      s.onmessage = (ev) => onMessage(ev.data);
     },
 
     disconnect(): void {
       const s = socket;
       socket = null;
+      handlers = null;
       outbox.reset();
-      pendingJoins.clear();
+      clearTransient();
       if (s) retire(s);
     },
 
@@ -291,6 +426,7 @@ export function phoenix(url: string, options: PhoenixOptions = {}): StreamAdapte
         topic: sub.channel,
         ...(sub.params !== undefined ? { params: sub.params } : {}),
       });
+      topicCount.set(sub.channel, (topicCount.get(sub.channel) ?? 0) + 1);
       // Join now if the link is up; otherwise the next onOpen replays the whole active set (so a
       // subscribe issued before open is never lost and never double-sent).
       if (isOpen()) sendJoin(sub.subId);
@@ -298,14 +434,42 @@ export function phoenix(url: string, options: PhoenixOptions = {}): StreamAdapte
 
     unsubscribe(subId: string): void {
       const entry = active.get(subId);
+      if (!entry) return;
       active.delete(subId); // dropped from the active set → not re-joined on reconnect
-      if (entry && isOpen()) outbox.push(encode([subId, nextRef(), entry.topic, LEAVE, {}]));
+      const joinRef = currentJoinRef.get(subId) ?? subId;
+      currentJoinRef.delete(subId);
+      const rejoin = rejoinTimers.get(subId);
+      if (rejoin !== undefined) {
+        timers.clearTimeout(rejoin);
+        rejoinTimers.delete(subId);
+      }
+      rejoinAttempts.delete(subId);
+      const remaining = (topicCount.get(entry.topic) ?? 1) - 1;
+      if (remaining > 0) topicCount.set(entry.topic, remaining);
+      else topicCount.delete(entry.topic);
+      if (isOpen()) outbox.push(encode([joinRef, nextRef(), entry.topic, LEAVE, {}]));
     },
 
     heartbeat(): void {
+      // Dead-link detection: the previous heartbeat is still unacked on this tick → zombie socket.
+      // Close it (fires onClose → the core reconnects) and reset heartbeat state.
+      if (heartbeatRef !== null) {
+        heartbeatRef = null;
+        const s = socket;
+        if (s) {
+          try {
+            s.close();
+          } catch {
+            /* already closing */
+          }
+        }
+        return;
+      }
       // Redundant under load — send only when the link can take it immediately; never queue it.
-      if (sink.state() === 'ready')
-        sink.write(encode([null, nextRef(), HEARTBEAT_TOPIC, HEARTBEAT, {}]));
+      if (sink.state() !== 'ready') return;
+      const ref = nextRef();
+      heartbeatRef = ref;
+      sink.write(encode([null, ref, HEARTBEAT_TOPIC, HEARTBEAT, {}]));
     },
   });
 }
