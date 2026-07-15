@@ -29,9 +29,9 @@ export function ThemeToggle({ className }: { className?: string }) {
       aria-label="Toggle theme"
       onClick={() => setTheme(isDark ? 'light' : 'dark')}
       className={[
-        // match Fumadocs' nav icon buttons (e.g. the GitHub link): borderless,
-        // rounded-md, ghost hover — so the two sit as siblings, same size/weight.
-        'relative inline-flex size-9 items-center justify-center rounded-md',
+        // borderless ghost icon button; rounded-full so the hover shape matches the
+        // pill nav links and stays consistent across navs.
+        'relative inline-flex size-9 items-center justify-center rounded-full',
         'text-fd-muted-foreground',
         'transition-colors hover:bg-fd-accent hover:text-fd-accent-foreground cursor-pointer',
         className ?? '',

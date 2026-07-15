@@ -1,5 +1,5 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
-import { appName, gitConfig } from './shared';
+import { appName } from './shared';
 import { ThemeToggle } from '@/components/theme-toggle';
 
 export function baseOptions(): BaseLayoutProps {
@@ -26,7 +26,7 @@ export function baseOptions(): BaseLayoutProps {
         </span>
       ),
     },
-    githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
+    // GitHub link omitted while the repo is private — re-add `githubUrl` when public.
     // single toggle whose icon swaps with the theme (Fumadocs' light-dark switch
     // keeps both icons in one pill — we supply our own one-icon toggle).
     themeSwitch: { component: <ThemeToggle /> },
