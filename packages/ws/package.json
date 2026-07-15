@@ -1,15 +1,35 @@
 {
   "name": "@liveflux/ws",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Generic WebSocket adapter for Liveflux — works with any backend that exposes a plain WebSocket, in any language.",
+  "keywords": [
+    "websocket",
+    "realtime",
+    "adapter",
+    "liveflux",
+    "reconnect",
+    "typescript"
+  ],
   "license": "MIT",
   "author": {
     "name": "Bhavin Devamorari",
     "url": "https://bpdm.dev"
   },
+  "homepage": "https://liveflux.bpdm.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liveflux/liveflux.git",
+    "directory": "packages/ws"
+  },
+  "bugs": "https://github.com/liveflux/liveflux/issues",
   "type": "module",
   "sideEffects": false,
-  "files": ["dist"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {

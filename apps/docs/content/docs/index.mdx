@@ -1,0 +1,70 @@
+---
+title: Introduction
+description: Typed, reconnect-safe realtime streaming state for the frontend.
+icon: BookOpen
+---
+
+**Liveflux** turns a live connection — WebSocket, Phoenix Channels, or any transport you give it
+an adapter for — into declarative, typed UI state. It is **protocol-agnostic** (via adapters) and **framework-agnostic**
+(via bindings), so the same engine drives a React app over plain WebSocket, Phoenix Channels, or
+whatever transport your backend speaks.
+
+<Callout type="warn">
+  Status: **pre-alpha**, building in the open. The API described here is real and tested, but not
+  yet published to npm and still subject to change.
+</Callout>
+
+## The problem
+
+A realtime feature looks small until you ship it. The moment a socket is involved you end up
+hand-rolling the same plumbing every time:
+
+- **Connection lifecycle** — connect, detect drops, reconnect with backoff, and re-subscribe on
+  every reopen without losing or duplicating data.
+- **Multiplexing + dedup** — one socket, many subscriptions; identical subscriptions should fold
+  once, not open N sockets.
+- **Cache glue** — turning a raw event stream into the shape a component actually renders (a log,
+  a keyed list, the latest value, an aggregate).
+- **Backpressure** — not blowing up the send buffer when a large active set is replayed over a
+  slow link.
+- **Tear-free reads** — reading changing external state from React without visual tearing under
+  concurrent rendering.
+
+Liveflux is the layer that owns all of that, behind a small typed surface.
+
+## Architecture
+
+Liveflux is split into an **engine**, **adapters**, and **bindings**:
+
+- **Engine (`@liveflux/core`)** — the `LivefluxClient` composes a connection manager, a
+  subscription registry (multiplexing + ref-counted dedup), and per-subscription stores. This is
+  the entire public surface; everything else is an implementation detail.
+- **Adapters** — one per wire protocol. An adapter implements the `StreamAdapter` contract:
+  `connect` / `disconnect` / `subscribe` / `unsubscribe`, plus optional `heartbeat` and `resume`.
+  It normalizes inbound frames into a transport-neutral `NormalizedEvent` (`{ channel, event,
+  payload }`) and encodes outbound control frames. The backend's language is irrelevant.
+- **Bindings** — one per UI framework. The React binding exposes `useStream` and `useConnection`,
+  reading the core's stores through `useSyncExternalStore` for tear-free updates.
+
+```text
+UI framework  ──  binding        ──  core engine        ──  adapter        ──  your backend
+(React)           @liveflux/react     @liveflux/core         @liveflux/ws        (any language)
+                  useStream           LivefluxClient         @liveflux/phoenix
+```
+
+## Packages
+
+| Package                   | Description                                                                                     |
+| ------------------------- | ----------------------------------------------------------------------------------------------- |
+| `@liveflux/core`          | Framework-agnostic engine — connection lifecycle, subscriptions, store, backpressure.           |
+| `@liveflux/ws`            | Generic WebSocket adapter. Works with any plain-WebSocket backend, in any language.             |
+| `@liveflux/phoenix`       | Phoenix Channels (v2) adapter — joins, rejoin backoff, and the `phoenix` heartbeat topic.       |
+| `@liveflux/react`         | React binding — the `useStream` hook (tear-free via `useSyncExternalStore`) + `LivefluxProvider`. |
+| `@liveflux/adapter-tests` | Shared conformance suite + a mock adapter, so every adapter is held to the same contract.       |
+
+## Next
+
+<Cards>
+  <Card title="Getting Started" href="/docs/getting-started" description="Install and wire up your first live stream" />
+  <Card title="Concepts" href="/docs/concepts" description="Client, subscriptions, strategies, backpressure, reconnect" />
+</Cards>

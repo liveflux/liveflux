@@ -1,15 +1,36 @@
 {
   "name": "@liveflux/react",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "React binding for Liveflux — the useStream hook for typed, reconnect-safe realtime state.",
+  "keywords": [
+    "react",
+    "websocket",
+    "realtime",
+    "hook",
+    "useSyncExternalStore",
+    "useStream",
+    "liveflux"
+  ],
   "license": "MIT",
   "author": {
     "name": "Bhavin Devamorari",
     "url": "https://bpdm.dev"
   },
+  "homepage": "https://liveflux.bpdm.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liveflux/liveflux.git",
+    "directory": "packages/react"
+  },
+  "bugs": "https://github.com/liveflux/liveflux/issues",
   "type": "module",
   "sideEffects": false,
-  "files": ["dist"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {

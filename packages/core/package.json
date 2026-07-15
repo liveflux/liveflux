@@ -1,14 +1,32 @@
 {
   "name": "@liveflux/core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Framework-agnostic core engine — connection lifecycle, subscriptions, store, and backpressure.",
+  "keywords": [
+    "websocket",
+    "realtime",
+    "streaming-state",
+    "reconnect",
+    "backpressure",
+    "typescript"
+  ],
   "license": "MIT",
   "author": {
     "name": "Bhavin Devamorari",
     "url": "https://bpdm.dev"
   },
+  "homepage": "https://liveflux.bpdm.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liveflux/liveflux.git",
+    "directory": "packages/core"
+  },
+  "bugs": "https://github.com/liveflux/liveflux/issues",
   "type": "module",
   "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist"
   ],

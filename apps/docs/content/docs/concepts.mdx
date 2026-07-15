@@ -1,0 +1,196 @@
+---
+title: Concepts
+description: The client, subscriptions and dedup, fold strategies, backpressure, and reconnect-safety.
+icon: Boxes
+---
+
+Everything in Liveflux composes behind one object — the `LivefluxClient`. This page explains what
+it owns and the guarantees each piece provides.
+
+## The client and the connection
+
+A `LivefluxClient` composes the connection lifecycle, the subscription registry, and the
+per-subscription stores behind a single surface. You construct one, hand it an adapter, and it owns
+exactly one connection for the whole app.
+
+```ts
+import { LivefluxClient } from '@liveflux/core';
+import { ws } from '@liveflux/ws';
+
+const client = new LivefluxClient({
+  adapter: ws('wss://example.com/socket'),
+  reconnect: { baseMs: 500, maxMs: 30_000 },
+  heartbeat: { intervalMs: 25_000 },
+});
+
+client.connect();
+```
+
+The connection moves through a small, observable state machine:
+
+```ts
+type ConnectionState = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed';
+
+const off = client.onConnectionChange((state, previous) => {
+  console.log(`${previous} → ${state}`);
+});
+
+// Surface adapter/connection errors without breaking the state machine.
+client.onError((err) => console.error(err));
+```
+
+`connect()` is a no-op while already connecting or open. `destroy()` tears everything down —
+unsubscribing every channel and closing the connection. Both the client and the subscription
+handles it hands back are frozen, so their methods can't be reassigned by a consumer.
+
+## Subscriptions, multiplexing, and dedup
+
+You subscribe by describing a channel and how its events fold into state:
+
+```ts
+const sub = client.subscribe<Trade>({
+  channel: 'trades',
+  into: { strategy: 'upsert', key: 'id' },
+  params: { market: 'spot' }, // optional; forwarded to the adapter's subscribe frame
+});
+
+sub.getState(); // current derived state
+const off = sub.subscribe(() => render()); // notified on change; drives useSyncExternalStore
+sub.destroy(); // release this handle
+```
+
+Every subscription is **multiplexed** onto the single connection, and **identical** subscriptions
+**share one fold**: same channel + a serializable strategy + serializable `params` produce the same
+share key, so their events are folded once and every subscriber reads the same store. The shared
+fold is **ref-counted** — its wire subscription is released only when the last subscriber calls
+`destroy()`.
+
+<Callout type="info">
+  Configs that carry functions — a `reducer`, or an `upsert` with a **function** `key` — and
+  non-serializable `params` can't be keyed, so each gets its own private fold. Correctness is never
+  traded for sharing.
+</Callout>
+
+## The store and fold strategies
+
+Each subscription owns a `Store` that folds incoming `NormalizedEvent`s into derived state
+according to its `into` strategy. Only the backing state a strategy actually uses is allocated, so
+stores stay lean at scale.
+
+### `append` → `T[]`
+
+Every event becomes a new entry; nothing is ever updated in place. Optional `cap` keeps only the
+last N (in a single new array — no spread-then-slice). Great for logs, chat, and activity feeds.
+
+```ts
+useStream<LogLine>({ channel: 'logs', into: { strategy: 'append', cap: 200 } });
+```
+
+### `upsert` → `T[]`
+
+A keyed list. A matching `key` updates that item in place (preserving insertion order); a new key
+is appended. Backed by an insertion-ordered `Map`, so set/delete are O(1) and an optional `cap`
+drops the oldest without rebuilding an index. Use it for live entity lists.
+
+```ts
+useStream<Order>({ channel: 'orders', into: { strategy: 'upsert', key: 'id', cap: 100 } });
+// or a computed key
+useStream<Order>({ channel: 'orders', into: { strategy: 'upsert', key: (o) => o.id } });
+```
+
+### `replace` → `T | undefined`
+
+Only the most recent event is kept — a single value, not a list. Use it for "current" state: the
+latest price, a live status, a gauge.
+
+```ts
+useStream<Price>({ channel: 'price:BTC', into: { strategy: 'replace' } });
+```
+
+### `reducer` → `S`
+
+Fold each event with your own function, exactly like `Array.reduce`, starting from `initial`. Use
+it for derived or aggregate state the built-in strategies don't cover.
+
+```ts
+useStream<Trade, Tally>({
+  channel: 'trades',
+  into: {
+    strategy: 'reducer',
+    reduce: (acc, event) => ({ ...acc, count: acc.count + 1 }),
+    initial: { count: 0 },
+  },
+});
+```
+
+## Reading in React tear-free
+
+The React binding reads stores through `useSyncExternalStore`, so reads are **tear-free** and safe
+under concurrent rendering. `useStream` re-subscribes only when the client or the subscription
+identity (channel + params + strategy) changes.
+
+For high-frequency streams, pass a `select` to subscribe to a derived slice — the component then
+re-renders **only when the selected value changes** (compared with `isEqual`, default `Object.is`):
+
+```tsx
+// Re-renders only when the count changes, not on every event.
+const count = useStream<Trade>(
+  { channel: 'trades', into: { strategy: 'append' } },
+  (trades) => trades.length,
+);
+```
+
+<Callout type="warn">
+  Treat the returned state as **read-only** — do not mutate it in place. Identical subscriptions
+  share one folded store, so mutating a returned array or object would corrupt every other
+  subscriber. Copy before transforming.
+</Callout>
+
+## Backpressure
+
+Adapters guard the outbound path. The WebSocket and Phoenix adapters watch the socket's
+`bufferedAmount`: once it reaches the high-water mark (`maxBufferedAmount`, default 1 MiB) control
+frames are queued and flushed as the buffer drains, while heartbeats are dropped rather than
+queued. This keeps the send buffer from blowing up when a large active set is replayed over a slow
+link. Inbound, oversized string frames are dropped before decoding (`maxMessageBytes`, default
+1 MiB) as a DoS bound.
+
+## Reconnect-safety
+
+This is the headline guarantee. On an unexpected close the client backs off and reconnects, then
+**replays every active subscription** on the new connection — so a stream resumes on its own with
+no code from you. Backoff is exponential with jitter, tuned by `ReconnectPolicy`:
+
+| Field         | Default    | Meaning                                                    |
+| ------------- | ---------- | ---------------------------------------------------------- |
+| `enabled`     | `true`     | Reconnect after an unexpected close.                       |
+| `baseMs`      | `500`      | Delay before the first retry.                              |
+| `maxMs`       | `30_000`   | Upper bound for any single delay.                          |
+| `factor`      | `2`        | Exponential growth factor per attempt.                     |
+| `jitter`      | `0.5`      | ± jitter fraction, to avoid thundering herds.              |
+| `maxAttempts` | `Infinity` | Give up after this many consecutive failed attempts.       |
+
+The WebSocket adapter pre-encodes each subscribe frame once and replays the cached wire string
+verbatim on every reopen — no repeated serialization. The Phoenix adapter re-joins its topics with
+capped backoff so a crash-looping channel can't hot-spin.
+
+## Adapters and the contract
+
+An adapter is the only protocol-specific piece. It implements `StreamAdapter`:
+
+```ts
+interface StreamAdapter {
+  connect(handlers: AdapterHandlers): void;
+  disconnect(): void;
+  subscribe(sub: SubscribeRequest): void;
+  unsubscribe(subId: string): void;
+  heartbeat?(): void;
+  resume?(subId: string, cursor: Cursor | null): void;
+}
+```
+
+It hands the core normalized events and receives the connection callbacks (`onOpen`, `onClose`,
+`onError`, `onEvent`). Both first-party adapters resolve their URL/params lazily per (re)connect,
+so a rotated short-lived auth token is picked up on the reconnect that follows an auth-expiry close
+— no adapter rebuild. Every adapter is verified against a shared conformance suite
+(`@liveflux/adapter-tests`), so they all honour the same contract.

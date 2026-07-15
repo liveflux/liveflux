@@ -1,6 +1,6 @@
 # @liveflux/phoenix
 
-The **Phoenix Channels** adapter for [Liveflux](https://liveflux.io) — turns an Elixir Phoenix
+The **Phoenix Channels** adapter for [Liveflux](https://liveflux.bpdm.dev) — turns an Elixir Phoenix
 Channels connection into a normalized, reconnect-safe event stream for the core engine.
 
 - **Phoenix v2 serializer, hand-rolled.** Speaks the wire protocol directly (`[join_ref, ref, topic,
@@ -121,6 +121,8 @@ core reconnect. This detects a half-open ("zombie") socket that never surfaces a
 Phoenix Channels have no native since-cursor, so this adapter does **not** implement the optional
 `resume` capability (v0.2 gap recovery). If your server emits gap tokens inside the event payload,
 provide a custom `decode` that lifts them onto `NormalizedEvent.cursor` / `.meta`.
+
+See the full documentation at [liveflux.bpdm.dev](https://liveflux.bpdm.dev).
 
 ## License
 

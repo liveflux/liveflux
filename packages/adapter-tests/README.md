@@ -132,6 +132,8 @@ runAdapterConformance({
 > A channel-level error → rejoin scenario (a single channel erroring while the socket stays up) is a
 > TODO — it needs fake-timer control over the adapter's backoff plus a per-channel-error seam.
 
+See the full documentation at [liveflux.bpdm.dev](https://liveflux.bpdm.dev).
+
 ## License
 
 MIT © [Bhavin Devamorari](https://bpdm.dev)

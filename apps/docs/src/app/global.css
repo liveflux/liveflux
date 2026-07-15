@@ -1,0 +1,131 @@
+@import 'tailwindcss';
+/* Fumadocs' self-contained neutral color scheme (defines every --color-fd-* token,
+   including the diff/code tokens the preset applies) + the UI preset on top. */
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+
+/* ── Liveflux brand accent ────────────────────────────────────────────────
+   One restrained, dark-capable accent that fits a realtime / streaming / signal
+   theme: an electric blue → indigo, reused verbatim from apps/playground so the
+   docs and the live demo read as one product. Applied by overriding Fumadocs'
+   primary + ring tokens (link colour, active nav item, focus ring, brand marks).
+   ------------------------------------------------------------------------- */
+:root {
+  --lf-accent: #3b7fe4; /* slightly deeper for AA contrast on the light paper */
+  --lf-accent-2: #6d55f5;
+  --color-fd-primary: var(--lf-accent);
+  --color-fd-ring: var(--lf-accent);
+}
+.dark {
+  --lf-accent: #5b9dff; /* the playground's electric blue reads best on dark */
+  --lf-accent-2: #7c5cff;
+  --color-fd-primary: var(--lf-accent);
+  --color-fd-ring: var(--lf-accent);
+}
+
+/* BPDM brand amber — used only for the "<BPDM/>" author mark in the footer, so the
+   credit reads as the BPDM brand (amber) and not the Liveflux accent (blue). Amber
+   sits low-contrast as text on light, so it's deepened on light themes for legibility
+   and shown bright on dark — same treatment bpdm's own UI uses. */
+:root {
+  --bpdm-brand: #9a5400; /* deep gold — readable amber on light */
+}
+.dark {
+  --bpdm-brand: #f5a623; /* the bpdm signature amber, bright on dark */
+}
+
+html {
+  scrollbar-gutter: stable;
+  background-color: var(--color-fd-background);
+}
+
+/* Tailwind v4's preflight dropped the default cursor:pointer on <button>. Restore
+   it for enabled buttons/role=button so every control (copy, scroll-to-top, …) reads
+   as clickable. */
+button:not(:disabled),
+[role='button']:not([aria-disabled='true']) {
+  cursor: pointer;
+}
+
+/* ── Reading typography: confident, tight headings; relaxed body rhythm. ── */
+#nd-page h1 {
+  font-size: clamp(2rem, 1.4rem + 2vw, 2.6rem);
+  font-weight: 700;
+  letter-spacing: -0.028em;
+  line-height: 1.1;
+}
+#nd-page h2 {
+  margin-top: 3.5rem;
+  font-weight: 650;
+  letter-spacing: -0.018em;
+}
+#nd-page h3 {
+  margin-top: 2.25rem;
+  letter-spacing: -0.012em;
+}
+#nd-page :is(p, li) {
+  line-height: 1.7;
+}
+/* the page description (subtitle) — softer, larger, set apart */
+#nd-page h1 + p {
+  font-size: 1.075rem;
+  color: var(--color-fd-muted-foreground);
+}
+#nd-page a:not([data-card]):not([class*='not-prose']) {
+  text-decoration-color: color-mix(in oklab, var(--lf-accent) 45%, transparent);
+  text-underline-offset: 3px;
+}
+
+/* ── Brand touch: a single, gently-drifting accent aurora at the top of the
+   page — decorative only (fixed height, pointer-events:none, z-index:-1),
+   fading out before the reading area. Restrained, not gimmicky. ── */
+body {
+  position: relative;
+  overflow-x: clip;
+}
+body::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 28rem;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      34rem 18rem at 22% -6rem,
+      color-mix(in oklab, var(--lf-accent) 22%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+      32rem 17rem at 80% -8rem,
+      color-mix(in oklab, var(--lf-accent-2) 16%, transparent),
+      transparent 60%
+    );
+  -webkit-mask-image: linear-gradient(to bottom, #000 35%, transparent);
+  mask-image: linear-gradient(to bottom, #000 35%, transparent);
+  animation: lf-aurora-drift 22s ease-in-out infinite alternate;
+}
+@keyframes lf-aurora-drift {
+  from {
+    transform: translate3d(-1.25rem, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(1.25rem, 0.4rem, 0) scale(1.06);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  body::before {
+    animation: none;
+  }
+}
+
+/* Fumadocs renders sidebar/nav markup itself; target its DOM for the pointer. */
+#nd-sidebar a,
+#nd-sidebar button,
+#nd-subnav a,
+#nd-subnav button,
+#nd-tocnav a,
+[role='tab'],
+figure button {
+  @apply cursor-pointer;
+}
