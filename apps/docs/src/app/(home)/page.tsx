@@ -108,7 +108,18 @@ export default function HomePage() {
       {/* Hero */}
       <section className="flex flex-col items-center py-20 text-center sm:py-28">
         <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-fd-border px-3 py-1 text-xs font-medium text-fd-muted-foreground">
-          <span className="size-1.5 rounded-full" style={{ backgroundColor: 'var(--lf-accent)' }} />
+          {/* same live pulse as the "Live · running now" dot in the demo — ping ring +
+              solid dot; the ring is CSS-gated off under prefers-reduced-motion */}
+          <span className="relative flex size-2.5 items-center justify-center">
+            <span
+              className="absolute inline-flex size-full animate-ping rounded-full opacity-60 motion-reduce:hidden"
+              style={{ backgroundColor: 'var(--lf-accent)' }}
+            />
+            <span
+              className="relative inline-flex size-2 rounded-full"
+              style={{ backgroundColor: 'var(--lf-accent)' }}
+            />
+          </span>
           Realtime streaming state · pre-alpha
         </span>
 
