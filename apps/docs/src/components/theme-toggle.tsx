@@ -29,20 +29,22 @@ export function ThemeToggle({ className }: { className?: string }) {
       aria-label="Toggle theme"
       onClick={() => setTheme(isDark ? 'light' : 'dark')}
       className={[
-        'relative inline-flex size-9 items-center justify-center rounded-full',
-        'border border-fd-border text-fd-muted-foreground',
+        // match Fumadocs' nav icon buttons (e.g. the GitHub link): borderless,
+        // rounded-md, ghost hover — so the two sit as siblings, same size/weight.
+        'relative inline-flex size-9 items-center justify-center rounded-md',
+        'text-fd-muted-foreground',
         'transition-colors hover:bg-fd-accent hover:text-fd-accent-foreground cursor-pointer',
         className ?? '',
       ].join(' ')}
     >
       <Sun
-        className={`size-4.5 transition-all duration-300 ${
+        className={`size-5 transition-all duration-300 ${
           isDark ? 'scale-0 -rotate-90 opacity-0' : 'scale-100 rotate-0 opacity-100'
         }`}
         fill="currentColor"
       />
       <Moon
-        className={`absolute size-4.5 transition-all duration-300 ${
+        className={`absolute size-5 transition-all duration-300 ${
           isDark ? 'scale-100 rotate-0 opacity-100' : 'scale-0 rotate-90 opacity-0'
         }`}
         fill="currentColor"
