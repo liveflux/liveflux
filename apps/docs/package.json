@@ -1,0 +1,40 @@
+{
+  "name": "@liveflux/docs",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Liveflux documentation site — Fumadocs + Next.js.",
+  "type": "module",
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev -p 3600",
+    "start": "next start -p 3600",
+    "types:check": "fumadocs-mdx && next typegen && tsc --noEmit",
+    "postinstall": "fumadocs-mdx",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@liveflux/core": "workspace:*",
+    "@liveflux/react": "workspace:*",
+    "fumadocs-core": "16.10.5",
+    "fumadocs-mdx": "15.0.12",
+    "fumadocs-ui": "16.10.5",
+    "lucide-react": "^1.20.0",
+    "next": "16.2.9",
+    "next-themes": "0.4.6",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.1",
+    "@types/mdx": "^2.0.14",
+    "@types/node": "^25.9.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "16.2.9",
+    "postcss": "^8.5.15",
+    "tailwindcss": "^4.3.1",
+    "typescript": "^6.0.3"
+  }
+}

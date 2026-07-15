@@ -1,0 +1,150 @@
+---
+title: Getting Started
+description: Install Liveflux and wire up your first live stream in a React app.
+icon: Rocket
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+This guide wires a React app to a plain-WebSocket backend and renders a live stream — the same
+shape the [playground](https://github.com/liveflux/liveflux/tree/main/apps/playground) uses.
+
+<Callout type="warn">
+  Pre-alpha: the packages are not on npm yet. For now, consume them from the monorepo via
+  `workspace:*` (or a git install). The import paths below are final.
+</Callout>
+
+## Install
+
+You need three packages for a React + WebSocket setup: the engine, a transport adapter, and the
+React binding.
+
+<Tabs items={['pnpm', 'npm', 'yarn']}>
+  <Tab value="pnpm">
+```bash
+pnpm add @liveflux/core @liveflux/ws @liveflux/react
+```
+  </Tab>
+  <Tab value="npm">
+```bash
+npm install @liveflux/core @liveflux/ws @liveflux/react
+```
+  </Tab>
+  <Tab value="yarn">
+```bash
+yarn add @liveflux/core @liveflux/ws @liveflux/react
+```
+  </Tab>
+</Tabs>
+
+Talking to a Phoenix backend instead? Swap `@liveflux/ws` for `@liveflux/phoenix` — everything
+below is identical apart from the adapter you construct.
+
+## 1. Create a client and provide it
+
+Create one `LivefluxClient`, give it an adapter, call `connect()`, and drop a `LivefluxProvider`
+near the root of your app. The client owns a single multiplexed connection, so every `useStream`
+below shares it.
+
+```tsx title="main.tsx"
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { LivefluxClient } from '@liveflux/core';
+import { LivefluxProvider } from '@liveflux/react';
+import { ws } from '@liveflux/ws';
+import { App } from './App';
+
+// One client for the whole app: the WebSocket adapter over your realtime backend.
+const client = new LivefluxClient({
+  adapter: ws('wss://example.com/socket'),
+  reconnect: { baseMs: 500, maxMs: 5000 },
+});
+client.connect();
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <LivefluxProvider client={client}>
+      <App />
+    </LivefluxProvider>
+  </StrictMode>,
+);
+```
+
+## 2. Subscribe to a channel with `useStream`
+
+`useStream` subscribes to a channel and folds its events into state via an `into` strategy,
+re-rendering as events arrive. The return type follows the strategy — here `upsert` keeps a keyed
+list (`Trade[]`), updating a row in place when an event carries an id it has already seen.
+
+```tsx title="App.tsx"
+import { useStream } from '@liveflux/react';
+
+type Trade = { id: number; symbol: string; price: number };
+
+export function App() {
+  // upsert → Trade[]: matching `id` updates in place, new `id` is appended (capped at 50).
+  const trades = useStream<Trade>({
+    channel: 'trades',
+    into: { strategy: 'upsert', key: 'id', cap: 50 },
+  });
+
+  return (
+    <table>
+      <tbody>
+        {trades.map((t) => (
+          <tr key={t.id}>
+            <td>{t.symbol}</td>
+            <td>{t.price.toFixed(2)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+```
+
+That is the whole app. The wire subscription is multiplexed onto the single connection,
+ref-counted (identical subscriptions fold once), and re-sent automatically after a reconnect — you
+did not write any of that.
+
+<Callout type="info">
+  Before the first event, list strategies (`append` / `upsert`) return `[]` and `reducer` returns
+  its `initial`, so results are always safe to `.map` immediately. `replace` returns `undefined`
+  until its first event.
+</Callout>
+
+## 3. Show connection status (optional)
+
+`useConnection` reads the live connection state and re-renders on every transition — ideal for a
+global status pill.
+
+```tsx title="StatusPill.tsx"
+import { useConnection } from '@liveflux/react';
+
+export function StatusPill() {
+  // 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed'
+  const state = useConnection();
+  return <span data-status={state}>{state}</span>;
+}
+```
+
+## Choosing a fold strategy
+
+The `into` strategy decides how events accumulate into state. Pick by the shape your UI needs:
+
+| Strategy  | Config                                | Returns        | Use for                                  |
+| --------- | ------------------------------------- | -------------- | ---------------------------------------- |
+| `append`  | `{ strategy: 'append', cap? }`        | `T[]`          | Logs, chat, activity feeds               |
+| `upsert`  | `{ strategy: 'upsert', key, cap? }`   | `T[]`          | Live entity lists (orders, prices)       |
+| `replace` | `{ strategy: 'replace' }`             | `T \| undefined` | "Current" value — latest price, a status |
+| `reducer` | `{ strategy: 'reducer', reduce, initial }` | `S`       | Derived / aggregate state — counters, tallies |
+
+See [Concepts](/docs/concepts) for how each strategy folds, how dedup works, and what makes
+reconnects safe.
+
+## Next
+
+<Cards>
+  <Card title="Concepts" href="/docs/concepts" description="Client, subscriptions, strategies, backpressure, reconnect" />
+  <Card title="Playground" href="https://github.com/liveflux/liveflux/tree/main/apps/playground" description="All four strategies, live, against a mock server" />
+</Cards>
