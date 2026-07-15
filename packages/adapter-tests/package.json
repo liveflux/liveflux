@@ -1,15 +1,35 @@
 {
   "name": "@liveflux/adapter-tests",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Testing moat for Liveflux — a programmable MockAdapter plus a shared, protocol-agnostic conformance suite every StreamAdapter must pass.",
+  "keywords": [
+    "testing",
+    "conformance",
+    "adapter",
+    "mock",
+    "liveflux",
+    "vitest"
+  ],
   "license": "MIT",
   "author": {
     "name": "Bhavin Devamorari",
     "url": "https://bpdm.dev"
   },
+  "homepage": "https://liveflux.bpdm.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liveflux/liveflux.git",
+    "directory": "packages/adapter-tests"
+  },
+  "bugs": "https://github.com/liveflux/liveflux/issues",
   "type": "module",
   "sideEffects": false,
-  "files": ["dist"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {

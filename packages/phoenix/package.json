@@ -1,14 +1,32 @@
 {
   "name": "@liveflux/phoenix",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Phoenix Channels adapter for Liveflux — the Elixir Phoenix Channels v2 wire protocol, hand-rolled with zero runtime dependencies.",
+  "keywords": [
+    "phoenix",
+    "phoenix-channels",
+    "elixir",
+    "realtime",
+    "websocket",
+    "liveflux"
+  ],
   "license": "MIT",
   "author": {
     "name": "Bhavin Devamorari",
     "url": "https://bpdm.dev"
   },
+  "homepage": "https://liveflux.bpdm.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liveflux/liveflux.git",
+    "directory": "packages/phoenix"
+  },
+  "bugs": "https://github.com/liveflux/liveflux/issues",
   "type": "module",
   "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist"
   ],
