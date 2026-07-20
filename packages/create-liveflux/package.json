@@ -1,0 +1,52 @@
+{
+  "name": "create-liveflux",
+  "version": "0.1.0",
+  "description": "Scaffold Liveflux into your project — pick a framework binding and a transport adapter, get a typed, reconnect-safe realtime client.",
+  "keywords": [
+    "liveflux",
+    "realtime",
+    "websocket",
+    "create",
+    "scaffold",
+    "cli",
+    "typescript"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "Bhavin Devamorari",
+    "url": "https://bpdm.dev"
+  },
+  "homepage": "https://liveflux.bpdm.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liveflux/liveflux.git",
+    "directory": "packages/create-liveflux"
+  },
+  "bugs": "https://github.com/liveflux/liveflux/issues",
+  "type": "module",
+  "bin": {
+    "create-liveflux": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "format": "prettier --write src"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}
