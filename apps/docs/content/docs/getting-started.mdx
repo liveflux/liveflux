@@ -9,15 +9,36 @@ import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 This guide wires a React app to a plain-WebSocket backend and renders a live stream — the same
 shape the playground app uses.
 
-<Callout type="warn">
-  Pre-alpha: the packages are not on npm yet. For now, consume them from the monorepo via
-  `workspace:*` (or a git install). The import paths below are final.
-</Callout>
-
 ## Install
 
-You need three packages for a React + WebSocket setup: the engine, a transport adapter, and the
-React binding.
+The fastest way is to **scaffold** it — one command picks your framework binding and transport,
+installs the packages, and writes a typed client:
+
+<Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
+  <Tab value="pnpm">
+```bash
+pnpm create liveflux@latest
+```
+  </Tab>
+  <Tab value="npm">
+```bash
+npm create liveflux@latest
+```
+  </Tab>
+  <Tab value="yarn">
+```bash
+yarn create liveflux
+```
+  </Tab>
+  <Tab value="bun">
+```bash
+bun create liveflux
+```
+  </Tab>
+</Tabs>
+
+Prefer to wire it by hand? You need three packages for a React + WebSocket setup — the engine, a
+transport adapter, and the React binding:
 
 <Tabs items={['pnpm', 'npm', 'yarn']}>
   <Tab value="pnpm">

@@ -20,7 +20,14 @@ state in React without tearing. Liveflux owns all of that behind a small typed s
 
 ## Install
 
-Pick the engine, a transport adapter, and your framework binding:
+Fastest — scaffold it in one command (picks your framework binding + transport, installs the
+packages, and writes a typed client):
+
+```bash
+pnpm create liveflux@latest
+```
+
+Or add the packages yourself — the engine, a transport adapter, and your framework binding:
 
 ```bash
 npm install @liveflux/core @liveflux/ws @liveflux/react
@@ -75,6 +82,7 @@ a reconnect — you wrote none of that.
 | `@liveflux/phoenix`       | Phoenix Channels (v2) adapter — joins, rejoin backoff, and the `phoenix` heartbeat topic.         |
 | `@liveflux/react`         | React binding — the `useStream` hook (tear-free via `useSyncExternalStore`) + `LivefluxProvider`. |
 | `@liveflux/adapter-tests` | Shared conformance suite + a mock adapter, so every adapter is held to the same contract.         |
+| `create-liveflux`         | Scaffolder — `pnpm create liveflux` picks a binding + adapter and wires a typed client.           |
 
 ## What you get
 

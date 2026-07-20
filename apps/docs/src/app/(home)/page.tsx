@@ -132,6 +132,17 @@ export default function HomePage() {
           </Link>
           {/* GitHub CTA omitted while the repo is private — re-add when public. */}
         </div>
+
+        <div className="mt-5 flex justify-center">
+          <div className="inline-flex items-center gap-3 rounded-lg border border-fd-border bg-fd-card px-4 py-2 font-mono text-sm">
+            <span className="select-none text-fd-muted-foreground">$</span>
+            <span>pnpm create liveflux@latest</span>
+            <CopyButton text="pnpm create liveflux@latest" />
+          </div>
+        </div>
+        <p className="mt-2 text-center text-xs text-fd-muted-foreground">
+          Scaffolds the client and installs the packages for your framework and transport.
+        </p>
       </section>
 
       {/* The punchline: the code AND its running result, side by side */}
