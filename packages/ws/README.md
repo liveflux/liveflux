@@ -4,6 +4,8 @@ The generic **WebSocket** adapter for [Liveflux](https://liveflux.bpdm.dev) — 
 that exposes a plain WebSocket, in any language. Turns a raw socket into a normalized, reconnect-safe
 event stream for `@liveflux/core`.
 
+> **New to Liveflux?** Start with `pnpm create liveflux@latest` — it picks your framework binding and transport and wires everything up for you.
+
 - **Backend-agnostic.** No wire-protocol assumptions — bring your own `encode`/`decode`.
 - **Zero runtime dependencies**, tree-shakeable, tiny.
 - **Reconnect-safe.** The active subscription set is re-sent on every reopen.

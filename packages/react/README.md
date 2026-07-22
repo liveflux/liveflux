@@ -4,6 +4,8 @@ The React binding for [Liveflux](https://liveflux.bpdm.dev) — the `useStream` 
 reconnect-safe realtime state. Reads go through `useSyncExternalStore`, so they are tear-free and
 safe under concurrent rendering.
 
+> **New to Liveflux?** Start with `pnpm create liveflux@latest` — it picks your framework binding and transport and wires everything up for you.
+
 ## Install
 
 ```sh

@@ -58,8 +58,9 @@ yarn add @liveflux/core @liveflux/ws @liveflux/react
   </Tab>
 </Tabs>
 
-Talking to a Phoenix backend instead? Swap `@liveflux/ws` for `@liveflux/phoenix` — everything
-below is identical apart from the adapter you construct.
+Talking to a different backend? Swap `@liveflux/ws` for another transport — `@liveflux/phoenix`,
+`@liveflux/sse`, or `@liveflux/socketio`. Everything below is identical apart from the adapter you
+construct; see [Adapters](/docs/adapters) for each one.
 
 ## 1. Create a client and provide it
 

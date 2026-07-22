@@ -1,0 +1,94 @@
+---
+title: Adapters
+description: The transport adapters Liveflux ships — WebSocket, Phoenix Channels, Server-Sent Events, and Socket.IO — plus how to write your own.
+icon: Cable
+---
+
+An **adapter** is the only protocol-specific piece of Liveflux. The core, the fold strategies, and
+the React binding never change — you pick the adapter that matches how your backend pushes, hand it
+to a `LivefluxClient`, and everything else is identical. Every adapter implements the same
+`StreamAdapter` contract, so swapping transports is a one-line change.
+
+| Package | Transport | Construct with |
+| --- | --- | --- |
+| `@liveflux/ws` | Any plain **WebSocket** (any backend, any language) | `ws(url)` |
+| `@liveflux/phoenix` | **Phoenix Channels** (v2 wire protocol) | `phoenix(url)` |
+| `@liveflux/sse` | **Server-Sent Events** (`EventSource`) | `sse(url)` |
+| `@liveflux/socketio` | **Socket.IO** (your own client socket) | `socketio(socket)` |
+
+All are zero-dependency and reconnect-safe: the core owns the reconnect policy, and each adapter
+replays its active subscription set on every reopen.
+
+## WebSocket — `@liveflux/ws`
+
+The generic adapter for any backend that exposes a plain WebSocket. It speaks a small JSON control
+protocol (subscribe / unsubscribe / heartbeat outbound; `{ channel, event, payload }` inbound), both
+sides overridable via `encode` / `decode`.
+
+```ts
+import { LivefluxClient } from '@liveflux/core';
+import { ws } from '@liveflux/ws';
+
+const client = new LivefluxClient({ adapter: ws('wss://example.com/socket') });
+client.connect();
+```
+
+## Phoenix Channels — `@liveflux/phoenix`
+
+For Elixir Phoenix backends. Hand-rolled v2 framing (zero-dep), joins a topic per channel, and
+re-joins on reconnect.
+
+```ts
+import { LivefluxClient } from '@liveflux/core';
+import { phoenix } from '@liveflux/phoenix';
+
+const client = new LivefluxClient({ adapter: phoenix('wss://example.com/socket/websocket') });
+client.connect();
+```
+
+## Server-Sent Events — `@liveflux/sse`
+
+For backends that stream over SSE. The downstream stream is a standard `EventSource`; because SSE is
+one-way, subscribe / unsubscribe / resume go **upstream** over a separate control channel — by
+default an HTTP `POST` alongside the stream (override with `control`, or supply your own transport
+function).
+
+```ts
+import { LivefluxClient } from '@liveflux/core';
+import { sse } from '@liveflux/sse';
+
+const client = new LivefluxClient({
+  adapter: sse('https://example.com/events', { control: 'https://example.com/events/control' }),
+});
+client.connect();
+```
+
+Cursor resume is supported: `resume(subId, cursor)` sends a gap-recovery frame, and the default
+decoder threads the SSE `lastEventId` through as the cursor. See the package README for the full
+options (`withCredentials`, injectable `EventSource` / `fetch`, `encode` / `decode`, `maxMessageBytes`).
+
+## Socket.IO — `@liveflux/socketio`
+
+Wraps a Socket.IO client socket you already created — your transport upgrade, rooms, and auth stay
+yours. `socket.io-client` is an optional peer you provide; the adapter never imports it, so nothing
+extra ships. Let the core own reconnect by disabling Socket.IO's own retry.
+
+```ts
+import { io } from 'socket.io-client';
+import { LivefluxClient } from '@liveflux/core';
+import { socketio } from '@liveflux/socketio';
+
+const socket = io('https://example.com', { reconnection: false });
+
+const client = new LivefluxClient({ adapter: socketio(socket) });
+client.connect();
+```
+
+By default it listens for a `message` event (`{ channel, event, payload }`) and emits `subscribe` /
+`unsubscribe` / `resume`; each event name and the decoder are overridable.
+
+## Write your own
+
+Anything push-capable can be an adapter — implement `StreamAdapter` (`connect` / `disconnect` /
+`subscribe` / `unsubscribe`, optionally `resume` / `heartbeat`) and prove it with the shared
+conformance suite from `@liveflux/adapter-tests`. See [Concepts](/docs/concepts) for the contract.

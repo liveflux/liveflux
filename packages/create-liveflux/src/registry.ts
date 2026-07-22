@@ -20,6 +20,8 @@ export interface Choice {
   readonly pkg?: string;
   /** named export used in generated code (adapters: the factory, e.g. `ws`) */
   readonly importName?: string;
+  /** extra packages this choice also needs (e.g. a peer client the consumer supplies) */
+  readonly extraPkgs?: readonly string[];
 }
 
 /** The core engine — always installed, regardless of choices. */
@@ -36,9 +38,9 @@ export const FRAMEWORKS: readonly Choice[] = [
 export const ADAPTERS: readonly Choice[] = [
   { id: 'ws', label: 'ws', hint: 'generic WebSocket — any backend, any language', status: 'stable', pkg: '@liveflux/ws', importName: 'ws' },
   { id: 'phoenix', label: 'phoenix', hint: 'Elixir Phoenix Channels (v2 wire protocol)', status: 'stable', pkg: '@liveflux/phoenix', importName: 'phoenix' },
+  { id: 'sse', label: 'sse', hint: 'Server-Sent Events — any backend', status: 'stable', pkg: '@liveflux/sse', importName: 'sse' },
+  { id: 'socket.io', label: 'socket.io', hint: 'Socket.IO client (bring your own socket)', status: 'stable', pkg: '@liveflux/socketio', importName: 'socketio', extraPkgs: ['socket.io-client'] },
   { id: 'gql-ws', label: 'gql-ws', hint: 'graphql-ws protocol — coming soon', status: 'soon' },
-  { id: 'socket.io', label: 'socket.io', hint: 'coming soon', status: 'soon' },
-  { id: 'sse', label: 'sse', hint: 'Server-Sent Events — coming soon', status: 'soon' },
 ] as const;
 
 export const stable = (choices: readonly Choice[]): Choice[] =>

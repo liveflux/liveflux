@@ -1,0 +1,8 @@
+[
+  {
+    "name": "@liveflux/socketio",
+    "path": "dist/index.js",
+    "limit": "1 kB",
+    "ignore": ["@liveflux/core"]
+  }
+]

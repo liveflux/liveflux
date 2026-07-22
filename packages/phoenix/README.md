@@ -3,6 +3,8 @@
 The **Phoenix Channels** adapter for [Liveflux](https://liveflux.bpdm.dev) — turns an Elixir Phoenix
 Channels connection into a normalized, reconnect-safe event stream for the core engine.
 
+> **New to Liveflux?** Start with `pnpm create liveflux@latest` — it picks your framework binding and transport and wires everything up for you.
+
 - **Phoenix v2 serializer, hand-rolled.** Speaks the wire protocol directly (`[join_ref, ref, topic,
 event, payload]`) — it does **not** depend on the `phoenix` npm package.
 - **Zero runtime dependencies**, tree-shakeable, tiny (size-limited in CI).

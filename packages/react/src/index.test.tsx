@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { LivefluxClient } from '@liveflux/core';
 import type { AdapterHandlers, StreamAdapter, SubscribeRequest } from '@liveflux/core';
 import type { ReactNode } from 'react';
-import { LivefluxProvider, useConnection, useStream } from './index';
+import { LivefluxProvider, useConnection, useConnectionStatus, useStream } from './index';
 
 /** Minimal adapter that opens synchronously and lets a test push events. */
 class MockAdapter implements StreamAdapter {
@@ -27,6 +27,9 @@ class MockAdapter implements StreamAdapter {
   }
   emit(channel: string, payload: unknown): void {
     this.handlers?.onEvent({ channel, event: 'update', payload });
+  }
+  fail(err: unknown): void {
+    this.handlers?.onError(err);
   }
 }
 
@@ -226,5 +229,38 @@ describe('useConnection', () => {
     const { wrapper } = setup();
     const { result } = renderHook(() => useConnection(), { wrapper });
     expect(result.current).toBe('open');
+  });
+});
+
+describe('useStream enabled', () => {
+  it('does not subscribe while enabled is false, then subscribes when flipped true', () => {
+    const { adapter, wrapper } = setup();
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) =>
+        useStream<number>({ channel: 'trades', into: { strategy: 'append' }, enabled }),
+      { wrapper, initialProps: { enabled: false } },
+    );
+    expect(result.current).toEqual([]);
+    expect(adapter.active.size).toBe(0); // no wire subscription while disabled
+    act(() => adapter.emit('trades', 1)); // event while disabled is not folded
+    expect(result.current).toEqual([]);
+
+    rerender({ enabled: true });
+    expect(adapter.active.size).toBe(1); // now subscribed
+    act(() => adapter.emit('trades', 2));
+    expect(result.current).toEqual([2]);
+  });
+});
+
+describe('useConnectionStatus', () => {
+  it('exposes the connection status and the latest transport error', () => {
+    const { adapter, wrapper } = setup();
+    const { result } = renderHook(() => useConnectionStatus(), { wrapper });
+    expect(result.current.status).toBe('open');
+    expect(result.current.error).toBeNull();
+
+    const err = new Error('transport-boom');
+    act(() => adapter.fail(err));
+    expect(result.current.error).toBe(err);
   });
 });

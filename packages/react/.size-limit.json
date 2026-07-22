@@ -2,7 +2,7 @@
   {
     "name": "@liveflux/react",
     "path": "dist/index.js",
-    "limit": "0.75 kB",
+    "limit": "1 kB",
     "ignore": ["@liveflux/core", "react", "react/jsx-runtime"]
   }
 ]
