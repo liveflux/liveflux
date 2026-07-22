@@ -16,6 +16,7 @@ export function packagesFor(selection: Selection): string[] {
   const packages = [CORE_PKG];
   const adapter = byId(ADAPTERS, selection.adapter);
   if (adapter?.pkg) packages.push(adapter.pkg);
+  if (adapter?.extraPkgs) packages.push(...adapter.extraPkgs);
   const framework = byId(FRAMEWORKS, selection.framework);
   if (framework?.pkg) packages.push(framework.pkg);
   return packages;

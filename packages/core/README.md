@@ -4,6 +4,8 @@ The framework-agnostic core engine of [Liveflux](https://liveflux.bpdm.dev) — 
 multiplexed subscriptions, folded state store, and backpressure. Type-safe, cache-integrated, and
 reconnect-safe realtime streaming state for the frontend.
 
+> **New to Liveflux?** Start with `pnpm create liveflux@latest` — it picks your framework binding and transport and wires everything up for you.
+
 It owns a single multiplexed connection and drives a pluggable transport `StreamAdapter`; pair it
 with one of the adapters below.
 

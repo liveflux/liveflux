@@ -1,0 +1,8 @@
+[
+  {
+    "name": "@liveflux/sse",
+    "path": "dist/index.js",
+    "limit": "1.5 kB",
+    "ignore": ["@liveflux/core"]
+  }
+]

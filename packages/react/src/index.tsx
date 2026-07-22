@@ -4,7 +4,9 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useRef,
+  useState,
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
@@ -20,20 +22,26 @@ import { SnapshotMemo } from './internal/snapshot-memo';
 const LivefluxContext = createContext<LivefluxClient | null>(null);
 LivefluxContext.displayName = 'LivefluxContext';
 
+/**
+ * When `enabled` is `false` the hook holds off subscribing and returns the strategy's initial
+ * state (`[]` / `undefined` / the reducer initial); flipping it to `true` subscribes. Lets a stream
+ * wait on a prerequisite (an id, auth, a visible tab) without conditionally calling the hook.
+ */
+type EnabledOption = { enabled?: boolean };
 /** Config for a strategy whose folded state is a list (`append` / `upsert`). */
-type ListConfig<T> = {
+type ListConfig<T> = EnabledOption & {
   channel: string;
   params?: Record<string, unknown>;
   into: Extract<IntoStrategy<T>, { strategy: 'append' | 'upsert' }>;
 };
 /** Config for the `replace` strategy — the latest payload (or `undefined` before the first). */
-type ReplaceConfig<T> = {
+type ReplaceConfig<T> = EnabledOption & {
   channel: string;
   params?: Record<string, unknown>;
   into: Extract<IntoStrategy<T>, { strategy: 'replace' }>;
 };
 /** Config for the `reducer` strategy — a custom fold into `S`. */
-type ReducerConfig<T, S> = {
+type ReducerConfig<T, S> = EnabledOption & {
   channel: string;
   params?: Record<string, unknown>;
   into: Extract<IntoStrategy<T, S>, { strategy: 'reducer' }>;
@@ -115,19 +123,20 @@ export function useStream<T, S, R>(
   isEqual?: (a: R, b: R) => boolean,
 ): R;
 export function useStream<T, S = T, R = unknown>(
-  config: SubscribeConfig<T, S>,
+  config: SubscribeConfig<T, S> & EnabledOption,
   select?: (state: T[] | T | S | undefined) => R,
   isEqual: (a: R, b: R) => boolean = Object.is,
 ): T[] | T | S | undefined | R {
   const client = useClient();
   const { channel, params, into } = config;
+  const enabled = config.enabled !== false; // default true
 
   // A stable identity for the wire subscription, mirroring core's subscription identity (channel +
-  // params + strategy). `useSyncExternalStore` re-subscribes when `subscribe` changes identity, so
-  // keying it on this — not just `channel` — tears down the old subscription and opens the new one
-  // whenever `params` or the fold `strategy` change. Without it the component would silently keep
-  // the OLD subscription and render the wrong stream's data.
-  const key = channel + '|' + JSON.stringify(params ?? null) + '|' + into.strategy;
+  // params + strategy) plus `enabled`. `useSyncExternalStore` re-subscribes when `subscribe` changes
+  // identity, so keying it on this — not just `channel` — tears down the old subscription and opens
+  // the new one whenever `params`, the fold `strategy`, or `enabled` change. Without it the component
+  // would silently keep the OLD subscription and render the wrong stream's data.
+  const key = channel + '|' + JSON.stringify(params ?? null) + '|' + into.strategy + '|' + enabled;
 
   // All per-instance mutable state lives in ONE lazily-initialised ref (one hook slot, one object),
   // including the selector memo. Nothing is allocated per render — the latest render inputs are just
@@ -158,6 +167,7 @@ export function useStream<T, S = T, R = unknown>(
   const subscribe = useCallback(
     (onStoreChange: () => void) => {
       const i = ref.current!;
+      if (!enabled) return () => {}; // disabled → no wire subscription; getSnapshot returns initial
       const sub = client.subscribe(i.config);
       i.sub = sub;
       const off = sub.subscribe(onStoreChange);
@@ -168,8 +178,8 @@ export function useStream<T, S = T, R = unknown>(
       };
     },
     // Subscription lifecycle is owned by React: re-run when the client or the subscription identity
-    // (channel + params + strategy, via `key`) changes — a clean teardown + re-subscribe.
-    [client, key],
+    // (channel + params + strategy + enabled, via `key`) changes — a clean teardown + re-subscribe.
+    [client, key, enabled],
   );
 
   // Snapshot memoisation is encapsulated in SnapshotMemo. `select` maps the raw state and `isEqual`
@@ -198,4 +208,36 @@ export function useConnection(): ConnectionState {
   );
   const getSnapshot = useCallback(() => client.getConnectionState(), [client]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+/** Connection status plus the most recent transport error (cleared once the link reopens). */
+export interface ConnectionStatus {
+  status: ConnectionState;
+  error: unknown;
+}
+
+/**
+ * Like {@link useConnection}, but also surfaces the latest transport `error`. The connection is
+ * shared across every `useStream`, so this is the status/error for the whole client. `error` holds
+ * the last error the adapter reported and is cleared automatically whenever the link (re)opens —
+ * render a reconnecting banner or a retry affordance from it.
+ */
+export function useConnectionStatus(): ConnectionStatus {
+  const client = useClient();
+  const status = useConnection();
+  const [error, setError] = useState<unknown>(null);
+
+  useEffect(() => {
+    // event-driven: record the last error; clear it the moment the link is healthy again
+    const offError = client.onError((err) => setError(err));
+    const offState = client.onConnectionChange((next) => {
+      if (next === 'open') setError(null);
+    });
+    return () => {
+      offError();
+      offState();
+    };
+  }, [client]);
+
+  return { status, error };
 }

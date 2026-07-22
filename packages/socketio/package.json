@@ -1,0 +1,64 @@
+{
+  "name": "@liveflux/socketio",
+  "version": "0.1.0",
+  "description": "Socket.IO adapter for Liveflux — wrap an existing Socket.IO client socket into a normalized, reconnect-safe event stream.",
+  "keywords": [
+    "socket.io",
+    "realtime",
+    "adapter",
+    "liveflux",
+    "reconnect",
+    "typescript"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "Bhavin Devamorari",
+    "url": "https://bpdm.dev"
+  },
+  "homepage": "https://liveflux.bpdm.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liveflux/liveflux.git",
+    "directory": "packages/socketio"
+  },
+  "bugs": "https://github.com/liveflux/liveflux/issues",
+  "type": "module",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "size": "size-limit",
+    "format": "prettier --write src"
+  },
+  "peerDependencies": {
+    "@liveflux/core": "workspace:*",
+    "socket.io-client": ">=4"
+  },
+  "peerDependenciesMeta": {
+    "socket.io-client": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@liveflux/adapter-tests": "workspace:*",
+    "@liveflux/core": "workspace:*",
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}

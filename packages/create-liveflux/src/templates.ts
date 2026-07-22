@@ -15,12 +15,34 @@ export function clientModule(adapter: Choice, typescript: boolean): string {
   const factory = adapter.importName ?? adapter.id;
   const pkg = adapter.pkg ?? '@liveflux/ws';
   const file = typescript ? 'liveflux.ts' : 'liveflux.js';
+
+  // Socket.IO takes a Socket instance (not a URL), so it constructs one — and lets Liveflux own
+  // reconnect by disabling Socket.IO's own retry.
+  if (adapter.id === 'socket.io') {
+    return `// ${file} — one client for the whole app, over your realtime backend.
+import { io } from 'socket.io-client';
+import { LivefluxClient } from '@liveflux/core';
+import { socketio } from '@liveflux/socketio';
+
+// Point this at your Socket.IO server. Liveflux owns reconnect, so disable Socket.IO's own.
+const socket = io('https://example.com', { reconnection: false });
+
+export const client = new LivefluxClient({
+  adapter: socketio(socket),
+});
+
+client.connect();
+`;
+  }
+
+  // SSE is an HTTP(S) endpoint; the socket adapters use a ws(s) URL.
+  const endpoint = adapter.id === 'sse' ? "'https://example.com/events'" : "'wss://example.com/socket'";
   return `// ${file} — one client for the whole app, over your realtime backend.
 import { LivefluxClient } from '@liveflux/core';
 import { ${factory} } from '${pkg}';
 
 // Point this at your backend's realtime endpoint.
-const ENDPOINT = 'wss://example.com/socket';
+const ENDPOINT = ${endpoint};
 
 export const client = new LivefluxClient({
   adapter: ${factory}(ENDPOINT),
