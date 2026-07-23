@@ -1,0 +1,60 @@
+{
+  "name": "@liveflux/graphql-ws",
+  "version": "0.1.0",
+  "description": "graphql-transport-ws adapter for Liveflux — GraphQL subscriptions over WebSocket, spoken directly with zero dependencies.",
+  "keywords": [
+    "graphql",
+    "graphql-ws",
+    "graphql-transport-ws",
+    "subscriptions",
+    "realtime",
+    "adapter",
+    "liveflux",
+    "typescript"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "Bhavin Devamorari",
+    "url": "https://bpdm.dev"
+  },
+  "homepage": "https://liveflux.bpdm.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liveflux/liveflux.git",
+    "directory": "packages/graphql-ws"
+  },
+  "bugs": "https://github.com/liveflux/liveflux/issues",
+  "type": "module",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "size": "size-limit",
+    "format": "prettier --write src"
+  },
+  "peerDependencies": {
+    "@liveflux/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@liveflux/adapter-tests": "workspace:*",
+    "@liveflux/core": "workspace:*",
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}

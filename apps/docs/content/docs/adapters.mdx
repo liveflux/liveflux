@@ -15,6 +15,7 @@ to a `LivefluxClient`, and everything else is identical. Every adapter implement
 | `@liveflux/phoenix` | **Phoenix Channels** (v2 wire protocol) | `phoenix(url)` |
 | `@liveflux/sse` | **Server-Sent Events** (`EventSource`) | `sse(url)` |
 | `@liveflux/socketio` | **Socket.IO** (your own client socket) | `socketio(socket)` |
+| `@liveflux/graphql-ws` | **GraphQL subscriptions** (`graphql-transport-ws`) | `graphqlWs(url)` |
 
 All are zero-dependency and reconnect-safe: the core owns the reconnect policy, and each adapter
 replays its active subscription set on every reopen.
@@ -86,6 +87,29 @@ client.connect();
 
 By default it listens for a `message` event (`{ channel, event, payload }`) and emits `subscribe` /
 `unsubscribe` / `resume`; each event name and the decoder are overridable.
+
+## GraphQL subscriptions — `@liveflux/graphql-ws`
+
+For GraphQL backends over the `graphql-transport-ws` protocol. It speaks the protocol **directly**
+over a WebSocket — no GraphQL client to bundle, zero dependencies. A liveflux channel maps to a
+subscription document (override with `query`), and each `next` result is routed back to its channel.
+
+```ts
+import { LivefluxClient } from '@liveflux/core';
+import { graphqlWs } from '@liveflux/graphql-ws';
+
+const client = new LivefluxClient({
+  adapter: graphqlWs('wss://example.com/graphql', {
+    query: (channel, params) => ({ query: channel, variables: params }),
+    connectionParams: () => ({ authToken: getToken() }),
+  }),
+});
+client.connect();
+```
+
+It handles the `connection_init` → `connection_ack` handshake, replays active subscriptions after
+each ack, answers `ping` with `pong`, and surfaces subscription `error`s. See the package README for
+`query` / `decode` / `connectionParams` details.
 
 ## Write your own
 
