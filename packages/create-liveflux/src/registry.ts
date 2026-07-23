@@ -40,7 +40,7 @@ export const ADAPTERS: readonly Choice[] = [
   { id: 'phoenix', label: 'phoenix', hint: 'Elixir Phoenix Channels (v2 wire protocol)', status: 'stable', pkg: '@liveflux/phoenix', importName: 'phoenix' },
   { id: 'sse', label: 'sse', hint: 'Server-Sent Events — any backend', status: 'stable', pkg: '@liveflux/sse', importName: 'sse' },
   { id: 'socket.io', label: 'socket.io', hint: 'Socket.IO client (bring your own socket)', status: 'stable', pkg: '@liveflux/socketio', importName: 'socketio', extraPkgs: ['socket.io-client'] },
-  { id: 'gql-ws', label: 'gql-ws', hint: 'graphql-ws protocol — coming soon', status: 'soon' },
+  { id: 'gql-ws', label: 'gql-ws', hint: 'GraphQL subscriptions (graphql-transport-ws)', status: 'stable', pkg: '@liveflux/graphql-ws', importName: 'graphqlWs' },
 ] as const;
 
 export const stable = (choices: readonly Choice[]): Choice[] =>

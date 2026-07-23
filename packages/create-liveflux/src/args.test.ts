@@ -48,7 +48,7 @@ describe('parseArgs — no bypass', () => {
     (flag) => expectUsageError([flag], /has no ".*" mode|chosen explicitly/i),
   );
 
-  it('rejects a coming-soon adapter', () => expectUsageError(['--adapter', 'gql-ws'], /not available yet/i));
+  // (no coming-soon adapter remains — the soon-rejection path is covered by the framework case below)
   it('rejects a coming-soon framework', () => expectUsageError(['--framework', 'vue'], /not available yet/i));
   it('rejects an unknown adapter', () => expectUsageError(['--adapter', 'nope'], /unknown adapter/i));
   it('rejects an unknown framework', () => expectUsageError(['--framework', 'nope'], /unknown framework/i));
