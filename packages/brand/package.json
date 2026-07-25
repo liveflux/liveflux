@@ -1,0 +1,32 @@
+{
+  "name": "@liveflux/brand",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Liveflux design tokens — the single source of truth for colour, type, space, radius, elevation and motion across the docs, playground and site.",
+  "license": "MIT",
+  "author": {
+    "name": "Bhavin Devamorari",
+    "url": "https://bpdm.dev"
+  },
+  "homepage": "https://liveflux.bpdm.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liveflux/liveflux.git",
+    "directory": "packages/brand"
+  },
+  "type": "module",
+  "sideEffects": [
+    "*.css"
+  ],
+  "exports": {
+    "./tokens.css": "./tokens.css",
+    "./primitives.css": "./primitives.css",
+    "./semantic.css": "./semantic.css"
+  },
+  "files": [
+    "tokens.css",
+    "primitives.css",
+    "semantic.css",
+    "README.md"
+  ]
+}

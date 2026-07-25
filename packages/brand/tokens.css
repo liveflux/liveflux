@@ -1,0 +1,12 @@
+/* ============================================================================
+   @liveflux/brand — the single import that gives an app the whole token system.
+
+   Usage (after `@import 'tailwindcss'` in your global stylesheet):
+       @import '@liveflux/brand/tokens.css';
+
+   Layers, in cascade order:
+     1. primitives.css — raw, theme-independent palette + scales (Tier 1)
+     2. semantic.css   — purpose-named, theme-aware aliases + Tailwind @theme (Tier 2)
+   ========================================================================== */
+@import "./primitives.css";
+@import "./semantic.css";

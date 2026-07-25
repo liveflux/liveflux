@@ -1,0 +1,141 @@
+/* ============================================================================
+   Liveflux · Semantic tokens (Tier 2)
+   ----------------------------------------------------------------------------
+   Purpose-named aliases that pick primitive values per THEME. This is the layer
+   apps + components consume (`--lf-primary`, `--lf-surface`, …) — never the raw
+   primitives — so re-theming or adding a theme is a change here alone.
+
+   Dark mode follows the `.dark` class (next-themes / Fumadocs class strategy).
+   Import order: `@import 'tailwindcss'` first (in the app), then this file, so
+   the `@theme` / `@custom-variant` below are processed by Tailwind.
+   ========================================================================== */
+
+/* `dark:` utilities respond to the .dark class (set by next-themes on <html>). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ── Light (default) ─────────────────────────────────────────────────────── */
+:root {
+  --lf-background: var(--lf-neutral-50); /* cool-slate page  */
+  --lf-foreground: var(--lf-neutral-950); /* near-black text   */
+  --lf-surface: var(--lf-neutral-0); /* cards lift off page */
+  --lf-surface-2: var(--lf-neutral-100); /* raised / inset      */
+  --lf-muted: var(--lf-neutral-100); /* muted fill surface  */
+  --lf-muted-foreground: var(--lf-neutral-600); /* AA secondary text   */
+  --lf-border: var(--lf-neutral-300);
+  --lf-input: var(--lf-neutral-400); /* ≥3:1 field boundary */
+  --lf-ring: var(--lf-blue-500);
+
+  --lf-primary: var(--lf-blue-500);
+  --lf-primary-foreground: var(--lf-neutral-0);
+  --lf-primary-hover: var(--lf-blue-600);
+  --lf-primary-subtle: color-mix(in oklab, var(--lf-blue-500) 12%, transparent);
+
+  --lf-secondary: var(--lf-indigo-500);
+  --lf-secondary-foreground: var(--lf-neutral-0);
+
+  --lf-success: var(--lf-green-500);
+  --lf-success-foreground: var(--lf-neutral-0);
+  --lf-warning: var(--lf-amber-500);
+  --lf-warning-foreground: var(--lf-neutral-0);
+  --lf-danger: var(--lf-red-500);
+  --lf-danger-foreground: var(--lf-neutral-0);
+
+  /* the top-of-page aurora gradient pair */
+  --lf-aurora-1: var(--lf-blue-500);
+  --lf-aurora-2: var(--lf-indigo-500);
+
+  /* BPDM author credit (footer only) */
+  --lf-author: var(--lf-author-light);
+
+  color-scheme: light;
+}
+
+/* ── Dark ────────────────────────────────────────────────────────────────── */
+.dark {
+  --lf-background: var(--lf-neutral-950);
+  --lf-foreground: var(--lf-neutral-200);
+  --lf-surface: var(--lf-neutral-900);
+  --lf-surface-2: var(--lf-neutral-850);
+  --lf-muted: var(--lf-neutral-850);
+  --lf-muted-foreground: var(--lf-neutral-500);
+  --lf-border: var(--lf-neutral-800);
+  --lf-input: var(--lf-neutral-700);
+  --lf-ring: var(--lf-blue-400);
+
+  --lf-primary: var(--lf-blue-400);
+  --lf-primary-foreground: var(--lf-neutral-950); /* dark text on the bright blue */
+  --lf-primary-hover: var(--lf-blue-300);
+  --lf-primary-subtle: color-mix(in oklab, var(--lf-blue-400) 16%, transparent);
+
+  --lf-secondary: var(--lf-indigo-400);
+  --lf-secondary-foreground: var(--lf-neutral-950);
+
+  --lf-success: var(--lf-green-400);
+  --lf-success-foreground: var(--lf-neutral-950);
+  --lf-warning: var(--lf-amber-400);
+  --lf-warning-foreground: var(--lf-neutral-950);
+  --lf-danger: var(--lf-red-400);
+  --lf-danger-foreground: var(--lf-neutral-950);
+
+  --lf-aurora-1: var(--lf-blue-400);
+  --lf-aurora-2: var(--lf-indigo-400);
+
+  --lf-author: var(--lf-author-dark);
+
+  color-scheme: dark;
+}
+
+/* ── Tailwind mapping — expose the semantic tokens as utilities
+   (`bg-lf-surface`, `text-lf-primary`, `border-lf-border`, `font-sans`, …). ── */
+@theme inline {
+  --color-lf-background: var(--lf-background);
+  --color-lf-foreground: var(--lf-foreground);
+  --color-lf-surface: var(--lf-surface);
+  --color-lf-surface-2: var(--lf-surface-2);
+  --color-lf-muted: var(--lf-muted);
+  --color-lf-muted-foreground: var(--lf-muted-foreground);
+  --color-lf-border: var(--lf-border);
+  --color-lf-input: var(--lf-input);
+  --color-lf-ring: var(--lf-ring);
+
+  --color-lf-primary: var(--lf-primary);
+  --color-lf-primary-foreground: var(--lf-primary-foreground);
+  --color-lf-primary-hover: var(--lf-primary-hover);
+  --color-lf-primary-subtle: var(--lf-primary-subtle);
+  --color-lf-secondary: var(--lf-secondary);
+  --color-lf-secondary-foreground: var(--lf-secondary-foreground);
+
+  --color-lf-success: var(--lf-success);
+  --color-lf-success-foreground: var(--lf-success-foreground);
+  --color-lf-warning: var(--lf-warning);
+  --color-lf-warning-foreground: var(--lf-warning-foreground);
+  --color-lf-danger: var(--lf-danger);
+  --color-lf-danger-foreground: var(--lf-danger-foreground);
+
+  --color-lf-author: var(--lf-author);
+
+  --font-sans: var(--lf-font-sans);
+  --font-mono: var(--lf-font-mono);
+
+  --radius-sm: var(--lf-radius-sm);
+  --radius-md: var(--lf-radius-md);
+  --radius-lg: var(--lf-radius-lg);
+  --radius-xl: var(--lf-radius-xl);
+  --radius-2xl: var(--lf-radius-2xl);
+}
+
+/* ── Signature motion: the drifting accent aurora (decorative, reduced-motion
+   safe). Ship the keyframe here so any surface can reuse the brand gesture. ── */
+@keyframes lf-aurora-drift {
+  from {
+    transform: translate3d(-1.25rem, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(1.25rem, 0.4rem, 0) scale(1.06);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-lf-aurora] {
+    animation: none !important;
+  }
+}

@@ -73,7 +73,17 @@ export function FloatingNav() {
         <Link href="/docs/concepts" className={linkCls}>
           Concepts
         </Link>
-        {/* GitHub link intentionally omitted while the repo is private — re-add when public. */}
+        <a
+          href="https://github.com/liveflux/liveflux"
+          target="_blank"
+          rel="noreferrer"
+          aria-label="Liveflux on GitHub"
+          className="inline-flex size-9 items-center justify-center rounded-full text-fd-muted-foreground transition-colors hover:text-fd-foreground"
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className="size-4">
+            <path d="M12 .5C5.37.5 0 5.78 0 12.29c0 5.2 3.44 9.6 8.2 11.16.6.1.82-.25.82-.56v-2c-3.34.72-4.04-1.6-4.04-1.6-.55-1.36-1.33-1.73-1.33-1.73-1.09-.73.08-.72.08-.72 1.2.08 1.83 1.22 1.83 1.22 1.07 1.8 2.8 1.28 3.49.98.1-.76.42-1.28.76-1.57-2.67-.3-5.47-1.31-5.47-5.84 0-1.29.47-2.35 1.24-3.18-.13-.3-.54-1.51.11-3.15 0 0 1.01-.32 3.3 1.21a11.6 11.6 0 016 0c2.29-1.53 3.3-1.21 3.3-1.21.65 1.64.24 2.85.11 3.15.77.83 1.24 1.89 1.24 3.18 0 4.54-2.81 5.54-5.48 5.83.43.37.81 1.1.81 2.22v3.29c0 .32.21.68.82.56A12.01 12.01 0 0024 12.29C24 5.78 18.63.5 12 .5z" />
+          </svg>
+        </a>
         <ThemeToggle />
       </nav>
     </div>
