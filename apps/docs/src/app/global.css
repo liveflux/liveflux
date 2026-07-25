@@ -3,35 +3,64 @@
    including the diff/code tokens the preset applies) + the UI preset on top. */
 @import 'fumadocs-ui/css/neutral.css';
 @import 'fumadocs-ui/css/preset.css';
+/* Dogfooding our own component library @bpdm/ui. Imported BEFORE @liveflux/brand so
+   Liveflux's `.dark` variant (below) is the one that wins; the bridge further down
+   re-points bpdm's semantic tokens at the Liveflux palette, so bpdm components render
+   in Liveflux blue, not bpdm amber. @source lets Tailwind emit the component classes. */
+@import '@bpdm/ui/styles.css';
+/* The shared Liveflux design tokens — single source of truth for colour, type,
+   space, radius, elevation and motion (see packages/brand). */
+@import '@liveflux/brand/tokens.css';
+@source '../../node_modules/@bpdm/ui/dist';
 
-/* ── Liveflux brand accent ────────────────────────────────────────────────
-   One restrained, dark-capable accent that fits a realtime / streaming / signal
-   theme: an electric blue → indigo, reused verbatim from apps/playground so the
-   docs and the live demo read as one product. Applied by overriding Fumadocs'
-   primary + ring tokens (link colour, active nav item, focus ring, brand marks).
-   ------------------------------------------------------------------------- */
+/* ── Wire the brand tokens into Fumadocs + keep this app's existing names ──
+   The accent (electric blue → indigo) comes from @liveflux/brand; here we point
+   Fumadocs' primary/ring at it and alias the token names this app's components
+   already use, so the look is unchanged and there's no duplicated palette. The
+   aliases resolve per-theme automatically (the semantic tokens flip under
+   `.dark`), so no separate light/dark block is needed. ────────────────────── */
 :root {
-  --lf-accent: #3b7fe4; /* slightly deeper for AA contrast on the light paper */
-  --lf-accent-2: #6d55f5;
-  --color-fd-primary: var(--lf-accent);
-  --color-fd-ring: var(--lf-accent);
-}
-.dark {
-  --lf-accent: #5b9dff; /* the playground's electric blue reads best on dark */
-  --lf-accent-2: #7c5cff;
-  --color-fd-primary: var(--lf-accent);
-  --color-fd-ring: var(--lf-accent);
-}
+  --lf-accent: var(--lf-primary); /* was #3b7fe4 / #5b9dff — identical */
+  --lf-accent-2: var(--lf-secondary); /* was #6d55f5 / #7c5cff — identical */
+  --bpdm-brand: var(--lf-author); /* footer author credit (amber) */
+  --color-fd-primary: var(--lf-primary);
+  --color-fd-ring: var(--lf-ring);
 
-/* BPDM brand amber — used only for the "<BPDM/>" author mark in the footer, so the
-   credit reads as the BPDM brand (amber) and not the Liveflux accent (blue). Amber
-   sits low-contrast as text on light, so it's deepened on light themes for legibility
-   and shown bright on dark — same treatment bpdm's own UI uses. */
-:root {
-  --bpdm-brand: #9a5400; /* deep gold — readable amber on light */
-}
-.dark {
-  --bpdm-brand: #f5a623; /* the bpdm signature amber, bright on dark */
+  /* ── @bpdm/ui → Liveflux bridge ──────────────────────────────────────────
+     bpdm/ui components read bpdm's semantic tokens (--primary, --card, --ring,
+     …). Re-point every one of those at the Liveflux palette so the components
+     wear Liveflux's blue-on-slate identity and follow its light/dark automatically
+     (the --lf-* tokens are theme-aware). Placed after the bpdm import so it wins.
+     Liveflux's own UI uses `--lf-*` / `--color-fd-*`, so overriding these bare
+     names is safe — only bpdm components read them. ─────────────────────────── */
+  --background: var(--lf-background);
+  --foreground: var(--lf-foreground);
+  --card: var(--lf-surface);
+  --card-foreground: var(--lf-foreground);
+  --popover: var(--lf-surface);
+  --popover-foreground: var(--lf-foreground);
+  --muted: var(--lf-muted);
+  --muted-foreground: var(--lf-muted-foreground);
+  --border: var(--lf-border);
+  --input: var(--lf-input);
+  --ring: var(--lf-ring);
+  --primary: var(--lf-primary);
+  --primary-foreground: var(--lf-primary-foreground);
+  --primary-strong: var(--lf-primary);
+  --secondary: var(--lf-secondary);
+  --secondary-foreground: var(--lf-secondary-foreground);
+  --accent: var(--lf-secondary);
+  --accent-foreground: var(--lf-secondary-foreground);
+  --destructive: var(--lf-danger);
+  --destructive-foreground: var(--lf-danger-foreground);
+  --destructive-strong: var(--lf-danger);
+  --success: var(--lf-success);
+  --success-foreground: var(--lf-success-foreground);
+  --success-strong: var(--lf-success);
+  --warning: var(--lf-warning);
+  --warning-foreground: var(--lf-warning-foreground);
+  --warning-strong: var(--lf-warning);
+  --radius: var(--lf-radius-lg);
 }
 
 html {

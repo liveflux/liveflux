@@ -26,7 +26,7 @@ export function baseOptions(): BaseLayoutProps {
         </span>
       ),
     },
-    // GitHub link omitted while the repo is private — re-add `githubUrl` when public.
+    githubUrl: 'https://github.com/liveflux/liveflux',
     // single toggle whose icon swaps with the theme (Fumadocs' light-dark switch
     // keeps both icons in one pill — we supply our own one-icon toggle).
     themeSwitch: { component: <ThemeToggle /> },

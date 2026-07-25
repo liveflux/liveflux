@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@liveflux/brand": "workspace:*",
     "@liveflux/core": "workspace:*",
     "@liveflux/react": "workspace:*",
     "@liveflux/ws": "workspace:*",

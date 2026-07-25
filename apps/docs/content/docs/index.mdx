@@ -57,10 +57,14 @@ UI framework  ──  binding        ──  core engine        ──  adapter 
 | Package                   | Description                                                                                     |
 | ------------------------- | ----------------------------------------------------------------------------------------------- |
 | `@liveflux/core`          | Framework-agnostic engine — connection lifecycle, subscriptions, store, backpressure.           |
-| `@liveflux/ws`            | Generic WebSocket adapter. Works with any plain-WebSocket backend, in any language.             |
-| `@liveflux/phoenix`       | Phoenix Channels (v2) adapter — joins, rejoin backoff, and the `phoenix` heartbeat topic.       |
 | `@liveflux/react`         | React binding — the `useStream` hook (tear-free via `useSyncExternalStore`) + `LivefluxProvider`. |
+| `@liveflux/ws`            | Generic WebSocket adapter. Works with any plain-WebSocket backend, in any language.             |
+| `@liveflux/sse`           | Server-Sent Events adapter — an `EventSource` stream with reconnect and cursor resume.          |
+| `@liveflux/socketio`      | Socket.IO adapter — wraps an existing Socket.IO client socket into a normalized event stream.   |
+| `@liveflux/graphql-ws`    | `graphql-transport-ws` adapter — GraphQL subscriptions over WebSocket, spoken with zero deps.   |
+| `@liveflux/phoenix`       | Phoenix Channels (v2) adapter — joins, rejoin backoff, and the `phoenix` heartbeat topic.       |
 | `@liveflux/adapter-tests` | Shared conformance suite + a mock adapter, so every adapter is held to the same contract.       |
+| `create-liveflux`         | Scaffolder — `pnpm create liveflux@latest` picks a binding + transport and writes a typed client. |
 
 ## Next
 

@@ -1,16 +1,23 @@
+/* Shared Liveflux design tokens (single source — see packages/brand). The <html>
+   carries the `dark` class (this playground is dark-only), so the semantic tokens
+   resolve to their dark values. The local names below are kept as thin aliases onto
+   the SEMANTIC tokens, so every rule in this file works unchanged with identical
+   colours — just no longer a duplicated palette. */
+@import '@liveflux/brand/tokens.css';
+
 :root {
-  --bg: #0b0e14;
-  --surface: #131820;
-  --surface-2: #1a212c;
-  --border: #232b38;
-  --text: #e6e9ef;
-  --muted: #8b93a7;
-  --accent: #5b9dff;
-  --green: #3fb950;
-  --amber: #d29922;
-  --red: #f85149;
-  --font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Fira Code', Menlo, monospace;
+  --bg: var(--lf-background); /* #0b0e14 */
+  --surface: var(--lf-surface); /* #131820 */
+  --surface-2: var(--lf-surface-2); /* #1a212c */
+  --border: var(--lf-border); /* #232b38 */
+  --text: var(--lf-foreground); /* #e6e9ef */
+  --muted: var(--lf-muted-foreground); /* #8b93a7 */
+  --accent: var(--lf-primary); /* #5b9dff */
+  --green: var(--lf-success); /* #3fb950 */
+  --amber: var(--lf-warning); /* #d29922 */
+  --red: var(--lf-danger); /* #f85149 */
+  --font: var(--lf-font-sans);
+  --mono: var(--lf-font-mono);
 }
 
 * {
@@ -43,7 +50,7 @@ body {
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: linear-gradient(135deg, var(--accent), #7c5cff);
+  background: linear-gradient(135deg, var(--accent), var(--lf-secondary));
   display: grid;
   place-items: center;
   font-weight: 800;

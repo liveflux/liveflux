@@ -1,5 +1,8 @@
 import Link from 'next/link';
 import { ArrowRight, Boxes } from 'lucide-react';
+// Dogfooding our own @bpdm/ui — themed to Liveflux blue via the token bridge in global.css.
+import { Button } from '@bpdm/ui/button';
+import { Badge } from '@bpdm/ui/badge';
 import { ScrollToTop } from '@/components/scroll-to-top';
 import { CopyButton } from '@/components/copy-button';
 import { LiveDemo } from '@/components/live-demo';
@@ -34,10 +37,18 @@ const JSON_LD = {
   url: 'https://liveflux.bpdm.dev',
   codeRepository: 'https://github.com/liveflux/liveflux',
   programmingLanguage: 'TypeScript',
-  runtimePlatform: ['React', 'WebSocket', 'Phoenix Channels'],
+  runtimePlatform: [
+    'React',
+    'WebSocket',
+    'Server-Sent Events',
+    'Socket.IO',
+    'graphql-transport-ws',
+    'Phoenix Channels',
+  ],
   license: 'https://opensource.org/licenses/MIT',
   author: { '@type': 'Person', name: 'Bhavin Devamorari', url: 'https://bpdm.dev' },
-  keywords: 'websocket, realtime, streaming state, react, phoenix channels, reconnect, typescript',
+  keywords:
+    'websocket, sse, server-sent events, socket.io, graphql-ws, phoenix channels, realtime, streaming state, react, reconnect, typescript',
 };
 
 const APP_SNIPPET = `import { useStream } from '@liveflux/react';
@@ -83,9 +94,12 @@ const HANDLES: { title: string; body: string }[] = [
 
 const PACKAGES: { name: string; body: string }[] = [
   { name: '@liveflux/core', body: 'Framework-agnostic engine — connection, subscriptions, store, backpressure.' },
-  { name: '@liveflux/ws', body: 'Generic WebSocket adapter for any plain-WebSocket backend, in any language.' },
-  { name: '@liveflux/phoenix', body: 'Phoenix Channels (v2) adapter — joins, rejoin backoff, heartbeat topic.' },
   { name: '@liveflux/react', body: 'React binding — the useStream hook + LivefluxProvider.' },
+  { name: '@liveflux/ws', body: 'Generic WebSocket adapter for any plain-WebSocket backend, in any language.' },
+  { name: '@liveflux/sse', body: 'Server-Sent Events adapter — an EventSource stream with reconnect + cursor resume.' },
+  { name: '@liveflux/socketio', body: 'Socket.IO adapter — wraps an existing Socket.IO client into a normalized stream.' },
+  { name: '@liveflux/graphql-ws', body: 'graphql-transport-ws adapter — GraphQL subscriptions over WebSocket, zero-dependency.' },
+  { name: '@liveflux/phoenix', body: 'Phoenix Channels (v2) adapter — joins, rejoin backoff, heartbeat topic.' },
 ];
 
 export default function HomePage() {
@@ -97,40 +111,50 @@ export default function HomePage() {
       />
       {/* Hero */}
       <section className="flex flex-col items-center py-20 text-center sm:py-28">
-        <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-fd-border px-3 py-1 text-xs font-medium text-fd-muted-foreground">
-          {/* same live pulse as the "Live · running now" dot in the demo — ping ring +
-              solid dot; the ring is CSS-gated off under prefers-reduced-motion */}
-          <span className="relative flex size-2.5 items-center justify-center">
-            <span
-              className="absolute inline-flex size-full animate-ping rounded-full opacity-60 motion-reduce:hidden"
-              style={{ backgroundColor: 'var(--lf-accent)' }}
-            />
-            <span
-              className="relative inline-flex size-2 rounded-full"
-              style={{ backgroundColor: 'var(--lf-accent)' }}
-            />
-          </span>
+        {/* dogfood: @bpdm/ui Badge — its dot+pulse is the live "signal" indicator, on-brand
+            for a realtime library. variant=primary tints the pulse blue; the pill itself keeps
+            the muted eyebrow look via Fumadocs' theme-aware border/text tokens. */}
+        <Badge
+          variant="primary"
+          appearance="outline"
+          dot
+          pulse
+          className="mb-5 border-fd-border text-fd-muted-foreground"
+        >
           Realtime streaming state · pre-alpha
-        </span>
+        </Badge>
 
         <h1 className="text-5xl font-bold tracking-tight sm:text-6xl">Liveflux</h1>
 
         <p className="mt-5 max-w-2xl text-lg text-fd-muted-foreground">
-          Turn a live connection — WebSocket, Phoenix Channels, any push transport — into{' '}
+          Turn a live connection — WebSocket, SSE, Socket.IO, Phoenix Channels, any push transport — into{' '}
           <strong className="font-semibold text-fd-foreground">typed, reconnect-safe</strong> UI
           state. You describe the channel and how its events fold; Liveflux owns the sockets, cache
           glue, dedup, backpressure, and reconnect logic.
         </p>
 
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-          <Link
-            href="/docs"
-            className="inline-flex h-11 items-center gap-2 rounded-lg bg-fd-primary px-6 text-sm font-semibold text-fd-primary-foreground transition-opacity hover:opacity-90"
+          {/* dogfood: @bpdm/ui Button (primary, blue via bridge) */}
+          <Button asChild variant="primary" size="lg" className="font-semibold">
+            <Link href="/docs">
+              Get started
+              <ArrowRight className="size-4" />
+            </Link>
+          </Button>
+          {/* repo is public — GitHub CTA (dogfood: @bpdm/ui Button, outline) */}
+          <Button
+            asChild
+            appearance="outline"
+            size="lg"
+            className="border-fd-border font-semibold text-fd-foreground hover:bg-fd-accent hover:text-fd-accent-foreground"
           >
-            Get started
-            <ArrowRight className="size-4" />
-          </Link>
-          {/* GitHub CTA omitted while the repo is private — re-add when public. */}
+            <a href="https://github.com/liveflux/liveflux" target="_blank" rel="noreferrer">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className="size-4">
+                <path d="M12 .5C5.37.5 0 5.78 0 12.29c0 5.2 3.44 9.6 8.2 11.16.6.1.82-.25.82-.56v-2c-3.34.72-4.04-1.6-4.04-1.6-.55-1.36-1.33-1.73-1.33-1.73-1.09-.73.08-.72.08-.72 1.2.08 1.83 1.22 1.83 1.22 1.07 1.8 2.8 1.28 3.49.98.1-.76.42-1.28.76-1.57-2.67-.3-5.47-1.31-5.47-5.84 0-1.29.47-2.35 1.24-3.18-.13-.3-.54-1.51.11-3.15 0 0 1.01-.32 3.3 1.21a11.6 11.6 0 016 0c2.29-1.53 3.3-1.21 3.3-1.21.65 1.64.24 2.85.11 3.15.77.83 1.24 1.89 1.24 3.18 0 4.54-2.81 5.54-5.48 5.83.43.37.81 1.1.81 2.22v3.29c0 .32.21.68.82.56A12.01 12.01 0 0024 12.29C24 5.78 18.63.5 12 .5z" />
+              </svg>
+              GitHub
+            </a>
+          </Button>
         </div>
 
         <div className="mt-5 flex justify-center">
@@ -206,7 +230,7 @@ export default function HomePage() {
           changing the adapter; the components don&apos;t move.
         </p>
         <div className="mx-auto mt-8 flex max-w-3xl flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-center">
-          {['Binding · @liveflux/react', 'Engine · @liveflux/core', 'Adapter · ws / phoenix', 'Your backend'].map(
+          {['Binding · @liveflux/react', 'Engine · @liveflux/core', 'Adapter · one of 5', 'Your backend'].map(
             (node, i) => (
               <div key={node} className="flex items-center gap-3 sm:contents">
                 <div className="flex-1 rounded-lg border border-fd-border px-4 py-3 text-center text-sm font-medium">
@@ -246,20 +270,27 @@ export default function HomePage() {
           about a dozen lines.
         </p>
         <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-          <Link
-            href="/docs/getting-started"
-            className="inline-flex h-11 items-center gap-2 rounded-lg bg-fd-primary px-6 text-sm font-semibold text-fd-primary-foreground transition-opacity hover:opacity-90"
+          {/* dogfood: @bpdm/ui Button (primary blue via bridge) */}
+          <Button asChild variant="primary" size="lg" className="font-semibold">
+            <Link href="/docs/getting-started">
+              Get started
+              <ArrowRight className="size-4" />
+            </Link>
+          </Button>
+          {/* dogfood: @bpdm/ui Button, outline. bpdm's colored-text uses `-strong` tokens which
+              don't resolve in this Fumadocs stack, so the border/text/hover use Fumadocs' own
+              theme-aware tokens (matching the site) while keeping the Button's shape + press. */}
+          <Button
+            asChild
+            appearance="outline"
+            size="lg"
+            className="border-fd-border font-semibold text-fd-foreground hover:bg-fd-accent hover:text-fd-accent-foreground"
           >
-            Get started
-            <ArrowRight className="size-4" />
-          </Link>
-          <Link
-            href="/docs/concepts"
-            className="inline-flex h-11 items-center gap-2 rounded-lg border border-fd-border px-6 text-sm font-semibold text-fd-foreground transition-colors hover:bg-fd-accent hover:text-fd-accent-foreground"
-          >
-            <Boxes className="size-4" />
-            Read the concepts
-          </Link>
+            <Link href="/docs/concepts">
+              <Boxes className="size-4" />
+              Read the concepts
+            </Link>
+          </Button>
         </div>
       </section>
 
@@ -298,7 +329,14 @@ function SiteFooter() {
           <Link href="/docs/concepts" className="transition-colors hover:text-fd-foreground">
             Concepts
           </Link>
-          {/* GitHub link omitted while the repo is private — re-add when public. */}
+          <a
+            href="https://github.com/liveflux/liveflux"
+            target="_blank"
+            rel="noreferrer"
+            className="transition-colors hover:text-fd-foreground"
+          >
+            GitHub
+          </a>
         </nav>
       </div>
 
