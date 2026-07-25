@@ -10,7 +10,7 @@ const inter = Inter({
 const SITE = 'https://liveflux.bpdm.dev';
 const TITLE = 'Liveflux — typed, reconnect-safe realtime streaming state';
 const DESCRIPTION =
-  'Liveflux turns a live connection (WebSocket, Phoenix Channels, and more via adapters) into declarative, typed UI state — protocol-agnostic via adapters, framework-agnostic via bindings. Stop hand-rolling sockets, cache glue, dedup, backpressure, and reconnect logic.';
+  'Turn a live connection (WebSocket, SSE, Phoenix Channels) into typed, reconnect-safe UI state. Liveflux owns the sockets, dedup, and reconnects.';
 
 // Site-level OpenGraph image: reuse the per-page OG generator, pointed at the
 // docs intro page (index.mdx → empty slug → /og/docs/image.png). Object form so
