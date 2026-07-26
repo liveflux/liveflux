@@ -95,11 +95,16 @@ const HANDLES: { title: string; body: string }[] = [
 const PACKAGES: { name: string; body: string }[] = [
   { name: '@liveflux/core', body: 'Framework-agnostic engine — connection, subscriptions, store, backpressure.' },
   { name: '@liveflux/react', body: 'React binding — the useStream hook + LivefluxProvider.' },
-  { name: '@liveflux/ws', body: 'Generic WebSocket adapter for any plain-WebSocket backend, in any language.' },
-  { name: '@liveflux/sse', body: 'Server-Sent Events adapter — an EventSource stream with reconnect + cursor resume.' },
-  { name: '@liveflux/socketio', body: 'Socket.IO adapter — wraps an existing Socket.IO client into a normalized stream.' },
-  { name: '@liveflux/graphql-ws', body: 'graphql-transport-ws adapter — GraphQL subscriptions over WebSocket, zero-dependency.' },
-  { name: '@liveflux/phoenix', body: 'Phoenix Channels (v2) adapter — joins, rejoin backoff, heartbeat topic.' },
+];
+
+// The 5 transport adapters — one engine, swappable backends. `transport` is the
+// human-recognizable name; `pkg` the package that normalizes it into a stream.
+const ADAPTERS: { transport: string; pkg: string; body: string }[] = [
+  { transport: 'WebSocket', pkg: '@liveflux/ws', body: 'Any plain-WebSocket backend, in any language.' },
+  { transport: 'Server-Sent Events', pkg: '@liveflux/sse', body: 'An EventSource stream with reconnect and cursor resume.' },
+  { transport: 'Socket.IO', pkg: '@liveflux/socketio', body: 'Wraps an existing Socket.IO client into a normalized stream.' },
+  { transport: 'GraphQL over WebSocket', pkg: '@liveflux/graphql-ws', body: 'graphql-transport-ws subscriptions, zero-dependency.' },
+  { transport: 'Phoenix Channels', pkg: '@liveflux/phoenix', body: 'Phoenix Channels v2 — joins, rejoin backoff, heartbeat topic.' },
 ];
 
 export default function HomePage() {
@@ -247,16 +252,63 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Packages */}
+      {/* Core packages */}
       <section className="border-t border-fd-border py-16">
-        <h2 className="text-center text-2xl font-semibold tracking-tight">Packages</h2>
-        <div className="mx-auto mt-8 grid max-w-3xl gap-4 sm:grid-cols-2">
+        <h2 className="text-center text-2xl font-semibold tracking-tight">Core packages</h2>
+        <p className="mx-auto mt-3 max-w-2xl text-center text-fd-muted-foreground">
+          The engine and the React binding — the two you always install. Add one adapter for your
+          transport and you&apos;re set.
+        </p>
+        <div className="mx-auto mt-8 grid max-w-2xl gap-4 sm:grid-cols-2">
           {PACKAGES.map((p) => (
-            <div key={p.name} className="rounded-xl border border-fd-border p-5">
+            <div
+              key={p.name}
+              className="rounded-xl border border-fd-border bg-fd-card p-5 transition-colors hover:border-[color:var(--lf-accent)]"
+            >
               <code className="text-sm font-semibold" style={{ color: 'var(--lf-accent)' }}>
                 {p.name}
               </code>
               <p className="mt-2 text-sm text-fd-muted-foreground">{p.body}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Adapters */}
+      <section className="border-t border-fd-border py-16">
+        <h2 className="text-center text-2xl font-semibold tracking-tight">
+          One core, five transports
+        </h2>
+        <p className="mx-auto mt-3 max-w-2xl text-center text-fd-muted-foreground">
+          Each adapter normalizes a different backend into the same stream. Same components, same{' '}
+          <code>useStream</code> — you only swap the adapter.
+        </p>
+        <div className="mx-auto mt-10 grid max-w-4xl gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {ADAPTERS.map((a, i) => (
+            <div
+              key={a.pkg}
+              className="rounded-xl border border-fd-border bg-fd-card p-5 transition-colors hover:border-[color:var(--lf-accent)]"
+            >
+              <div className="flex items-center gap-2.5">
+                <span
+                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-xs font-bold"
+                  style={{
+                    background: 'color-mix(in srgb, var(--lf-accent) 15%, transparent)',
+                    color: 'var(--lf-accent)',
+                  }}
+                  aria-hidden
+                >
+                  {i + 1}
+                </span>
+                <h3 className="font-semibold leading-tight">{a.transport}</h3>
+              </div>
+              <code
+                className="mt-3 inline-block text-xs font-semibold"
+                style={{ color: 'var(--lf-accent)' }}
+              >
+                {a.pkg}
+              </code>
+              <p className="mt-2 text-sm text-fd-muted-foreground">{a.body}</p>
             </div>
           ))}
         </div>
