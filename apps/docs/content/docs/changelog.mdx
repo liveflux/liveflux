@@ -1,0 +1,27 @@
+---
+title: Changelog
+description: Notable changes and releases across the Liveflux packages.
+---
+
+Notable changes to Liveflux.
+
+<Callout type="warn">
+  Liveflux is **pre-alpha**. The API is still settling, so minor versions may contain
+  breaking changes until 1.0.
+</Callout>
+
+## Unreleased
+
+The current shape of the project:
+
+- **`@liveflux/core`** — the framework-agnostic engine: connection, subscriptions, store, reconnect with backoff, and backpressure.
+- **`@liveflux/react`** — the React binding: the `useStream` hook, `LivefluxProvider`, and a status/error surface.
+- **Adapters** — one engine, swappable transports:
+  - `@liveflux/ws` — generic WebSocket, for any plain-WebSocket backend.
+  - `@liveflux/sse` — Server-Sent Events, with reconnect and cursor resume.
+  - `@liveflux/socketio` — wraps an existing Socket.IO client into a normalized stream.
+  - `@liveflux/graphql-ws` — graphql-transport-ws (GraphQL subscriptions over WebSocket), zero-dependency.
+  - `@liveflux/phoenix` — Phoenix Channels (v2): joins, rejoin backoff, and the heartbeat topic.
+- **`create-liveflux`** — an interactive scaffolder (`pnpm create liveflux@latest`) that sets up the client and installs the packages for your framework and transport.
+
+Everything is TypeScript-first and tree-shakeable, and reads go through `useSyncExternalStore` for tear-free React state. Follow along on [GitHub](https://github.com/liveflux/liveflux).

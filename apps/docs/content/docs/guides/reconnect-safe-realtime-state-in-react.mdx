@@ -1,0 +1,78 @@
+---
+title: Reconnect-safe realtime state in React
+description: Turn a WebSocket, SSE, or Phoenix Channels stream into typed, reconnect-safe React state, without hand-rolling sockets, dedup, backpressure, and reconnect logic.
+---
+
+A realtime feature looks small in a demo. You open a WebSocket, push messages into state, render a list. Then it meets production: the socket drops on a flaky network and never comes back, two components open the same subscription twice, a burst of messages floods the UI, and a fast re-render tears the list mid-update. Suddenly the "small" feature is a pile of socket plumbing.
+
+Most of that plumbing is the same every time. Here is a way to think about realtime state in React so you write the interesting part and skip the boilerplate.
+
+## The problem: raw sockets don't map to UI state
+
+A WebSocket (or an SSE stream, or a Phoenix channel) hands you a *sequence of events*. Your UI wants *state*: a list, a latest value, a keyed table. Bridging the two by hand means you end up owning all of this:
+
+- **Reconnects.** On an unexpected close, back off and re-subscribe, or the stream silently dies.
+- **Deduplication.** Two components asking for the same channel shouldn't open two sockets.
+- **Backpressure.** A flood of messages shouldn't lock up the main thread.
+- **Tear-free reads.** Under concurrent rendering, state has to stay consistent within a render.
+
+None of that is your feature. It's the tax you pay to ship the feature.
+
+## The shape that works: fold events into typed state
+
+The trick is to stop thinking "messages" and start thinking "a reducer over a stream." You describe *which* channel to subscribe to and *how* each event folds into the state your UI renders. The library owns the connection; you own the fold.
+
+```tsx
+import { useStream } from '@liveflux/react';
+
+type Trade = { id: number; symbol: string; price: number };
+
+export function Trades() {
+  // upsert -> Trade[]: a matching id updates in place, a new id is appended.
+  const trades = useStream<Trade>({
+    channel: 'trades',
+    into: { strategy: 'upsert', key: 'id', cap: 50 },
+  });
+
+  return trades.map((t) => <Row key={t.id} symbol={t.symbol} price={t.price} />);
+}
+```
+
+That's the whole component. The common fold strategies cover most UIs:
+
+- **append** — a log (chat, an event feed), capped so it doesn't grow forever.
+- **upsert** — a keyed list (an order book, presence), updated in place.
+- **replace** — the latest value (a live price, a status).
+- a custom **reducer** — anything else.
+
+## Reconnects, dedup, and backpressure come for free
+
+Because the library owns the connection, the hard parts are handled once, for every subscription:
+
+- On an unexpected close it backs off with jitter and replays every active subscription on the new socket, so streams resume on their own.
+- Identical subscriptions share one connection and fold once, ref-counted; the socket closes only when the last subscriber leaves.
+- Adapters watch the send buffer and drop oversized inbound frames before decoding, so a burst can't lock the UI.
+- Reads go through `useSyncExternalStore`, so state stays tear-free under concurrent rendering.
+
+<Callout type="info">
+  Pass a selector to `useStream` to re-render only when the slice you read changes, not on every event.
+</Callout>
+
+## Not just WebSockets, not just React
+
+The same idea works over any push transport. Point it at a plain WebSocket, Server-Sent Events, Socket.IO, a GraphQL subscription, or Phoenix Channels by swapping the adapter — the component doesn't change. And because the engine is framework-agnostic, the same core can drive bindings beyond React.
+
+That's what makes the approach durable: you describe the stream and the fold once, and the transport (and even the framework) becomes a detail you can change later without rewriting your components.
+
+## Try it with Liveflux
+
+[Liveflux](/docs) is this pattern as a small, typed library: an engine (`@liveflux/core`), a React binding (`@liveflux/react`), and adapters for WebSocket, SSE, Socket.IO, GraphQL over WebSocket, and Phoenix Channels.
+
+- **[Get started](/docs/getting-started)** — install, add a provider, and call `useStream`.
+- **[Concepts](/docs/concepts)** — channels, fold strategies, and the store.
+
+## Takeaways
+
+- Model realtime as a reducer over a stream: describe the channel and how events fold into state.
+- Let a library own reconnects, dedup, backpressure, and tear-free reads. That plumbing is the same every time.
+- Keep the transport (WebSocket, SSE, Phoenix) and the framework as swappable details, not something baked into every component.
