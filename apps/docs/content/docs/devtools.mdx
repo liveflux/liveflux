@@ -1,0 +1,152 @@
+---
+title: DevTools
+description: A dev-only panel that shows any Liveflux client's connection, subscriptions, live events, and errors — zero config.
+icon: Bug
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+`@liveflux/devtools` is a **dev-only** panel for inspecting a live Liveflux client at runtime:
+connection state and reconnect timeline, active subscriptions, the live event stream, and errors —
+with a searchable, pausable log. Install it as a `devDependency` and it is **tree-shaken from your
+production build**; nothing ships to users.
+
+It reads the client through a lightweight `observe()` tap in the core, so it works with **every
+framework and every transport adapter** — no per-framework wiring.
+
+<Callout type="info">
+  Payloads are **redacted before they reach the panel** — common secret keys (`token`, `password`,
+  `authorization`, …) are scrubbed automatically, so you never see a raw credential in the log.
+</Callout>
+
+## Install
+
+<Tabs items={['pnpm', 'npm', 'yarn']}>
+  <Tab value="pnpm">
+```bash
+pnpm add -D @liveflux/devtools
+```
+  </Tab>
+  <Tab value="npm">
+```bash
+npm install --save-dev @liveflux/devtools
+```
+  </Tab>
+  <Tab value="yarn">
+```bash
+yarn add -D @liveflux/devtools
+```
+  </Tab>
+</Tabs>
+
+## Quick start (React)
+
+Two steps behind a dev guard: **attach** the panel to your client, and **render** it. The guard
+(`import.meta.env.DEV` in Vite) ensures both are dropped from production bundles.
+
+```tsx title="main.tsx"
+import { LivefluxClient } from '@liveflux/core';
+import { ws } from '@liveflux/ws';
+import { attachDevtools } from '@liveflux/devtools';
+import { LivefluxDevtools } from '@liveflux/devtools/react';
+
+const client = new LivefluxClient({ adapter: ws('wss://example.com/socket') });
+client.connect();
+
+// 1. Wire the panel to this client (dev only).
+if (import.meta.env.DEV) attachDevtools(client);
+
+createRoot(document.getElementById('root')!).render(
+  <LivefluxProvider client={client}>
+    <App />
+    {/* 2. Render the floating panel (dev only). */}
+    {import.meta.env.DEV && <LivefluxDevtools />}
+  </LivefluxProvider>,
+);
+```
+
+A floating **bug launcher** appears in the corner. Click it to open the panel; its dot shows live
+connection health (green open · amber connecting · red closed) even while minimized.
+
+## Any framework (Web Component)
+
+The panel is a framework-agnostic Web Component, so Vue, Svelte, Angular, or plain HTML use the same
+element — no React required.
+
+```ts
+import { attachDevtools } from '@liveflux/devtools';
+import { defineLivefluxDevtools } from '@liveflux/devtools/element';
+
+if (import.meta.env.DEV) {
+  attachDevtools(client);
+  defineLivefluxDevtools(); // registers <liveflux-devtools>
+  document.body.insertAdjacentHTML('beforeend', '<liveflux-devtools></liveflux-devtools>');
+}
+```
+
+## The panel
+
+The window has four tabs, each answering a common debugging question:
+
+- **Connection** — current state plus a timeline of every transition (`connecting → open → reconnecting → open`). Confirms a reconnect actually happened.
+- **Subscriptions** — the active table: channel, fold strategy, cap, and **ref-count**. Catches leaked or duplicate subscriptions at a glance.
+- **Events** — the live stream: time, `channel/event`, size, and a payload preview.
+- **Errors** — surfaced errors with their name and code.
+
+### Debugging the event log
+
+The log is built for inspection under a fast stream:
+
+- **Filter** — type to match across channel, event, and payload (case-insensitive).
+- **Pause / Resume** — freeze the view to read a row; the client keeps folding underneath, and resume catches up.
+- **Clear** — hide everything so far to isolate what happens next. Non-destructive — new events still stream in.
+- **Expand a row** — click it for the full, pretty-printed payload, with one-click **Copy** for a bug report or a test fixture.
+
+### Moving it around
+
+The launcher is **draggable anywhere** on screen; drop it wherever it's out of your way. Its position
+and open/minimized state are remembered across reloads. Minimize from the panel header (`─`) to
+collapse back to the icon.
+
+## Options
+
+`attachDevtools` takes an optional config:
+
+```ts
+attachDevtools(client, {
+  redactKeys: ['ssn', 'accountNumber'], // extra keys to scrub, on top of the defaults
+  bufferSize: 2000, // recent events kept for a late-opening panel (default 1000)
+});
+```
+
+Both `attachDevtools` and `attachLogger` return a **detach** function if you need to tear down early.
+
+## Console logging
+
+Prefer logs over a panel — or want both? `attachLogger` writes the same observed stream to the
+console, with the same redaction:
+
+```ts
+import { attachLogger } from '@liveflux/devtools';
+
+if (import.meta.env.DEV) attachLogger(client, { level: 'debug' });
+```
+
+## Theming (optional)
+
+The panel ships a self-contained dark theme that looks right on any app and never inherits your
+styles by accident. To retint it, set any of the public `--lf-dt-*` variables on the element (or
+`:root`):
+
+```css
+liveflux-devtools {
+  --lf-dt-primary: #e11d48;
+  --lf-dt-surface: #1a1a1a;
+}
+```
+
+## Production
+
+`@liveflux/devtools` is a `devDependency` with `sideEffects: false`. As long as the calls sit behind
+a dev guard (`import.meta.env.DEV`), your bundler tree-shakes the entire package out of production —
+so it costs your users **nothing**.
