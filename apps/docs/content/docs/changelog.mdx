@@ -22,6 +22,7 @@ The current shape of the project:
   - `@liveflux/socketio` — wraps an existing Socket.IO client into a normalized stream.
   - `@liveflux/graphql-ws` — graphql-transport-ws (GraphQL subscriptions over WebSocket), zero-dependency.
   - `@liveflux/phoenix` — Phoenix Channels (v2): joins, rejoin backoff, and the heartbeat topic.
+- **`@liveflux/devtools`** — a dev-only panel (`npm i -D`) for inspecting any client at runtime: connection timeline, subscriptions, a searchable/pausable live event log with full payload inspection, and errors. Framework- and transport-agnostic; tree-shaken from production. See [DevTools](/docs/devtools).
 - **`create-liveflux`** — an interactive scaffolder (`pnpm create liveflux@latest`) that sets up the client and installs the packages for your framework and transport.
 
 Everything is TypeScript-first and tree-shakeable, and reads go through `useSyncExternalStore` for tear-free React state. Follow along on [GitHub](https://github.com/liveflux/liveflux).
