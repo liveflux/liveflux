@@ -13,6 +13,7 @@
   "dependencies": {
     "@liveflux/brand": "workspace:*",
     "@liveflux/core": "workspace:*",
+    "@liveflux/devtools": "workspace:*",
     "@liveflux/react": "workspace:*",
     "@liveflux/ws": "workspace:*",
     "react": "^19.0.0",
