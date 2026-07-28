@@ -1,0 +1,76 @@
+{
+  "name": "@liveflux/devtools",
+  "version": "0.1.0",
+  "description": "Dev-only observability tooling for Liveflux — an event bus, redaction, and client discovery a DevTools panel builds on. Install as a devDependency; stripped from production.",
+  "keywords": [
+    "liveflux",
+    "devtools",
+    "observability",
+    "realtime",
+    "debugging",
+    "typescript"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "Bhavin Devamorari",
+    "url": "https://bpdm.dev"
+  },
+  "homepage": "https://liveflux.bpdm.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liveflux/liveflux.git",
+    "directory": "packages/devtools"
+  },
+  "bugs": "https://github.com/liveflux/liveflux/issues",
+  "type": "module",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./element": {
+      "types": "./dist/element.d.ts",
+      "import": "./dist/element.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "size": "size-limit",
+    "format": "prettier --write src"
+  },
+  "peerDependencies": {
+    "@liveflux/core": "workspace:*",
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@liveflux/core": "workspace:*",
+    "@testing-library/react": "^16.1.0",
+    "@types/react": "^19.0.0",
+    "jsdom": "^25.0.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}

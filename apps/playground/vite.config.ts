@@ -9,11 +9,18 @@ const src = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 export default defineConfig({
   plugins: [react()],
   server: { port: 9000 }, // digits sum to 9
+  // Don't pre-bundle the workspace @liveflux/* packages — serve them from source (via the aliases
+  // below) as a single module graph, so the bare `@liveflux/devtools` import and the source-aliased
+  // `/react` + `/element` subpaths share ONE instance (hook + bus singletons stay unified).
+  optimizeDeps: { exclude: ['@liveflux/core', '@liveflux/ws', '@liveflux/react', '@liveflux/devtools'] },
   resolve: {
     alias: {
       '@liveflux/core': src('../../packages/core/src/index.ts'),
       '@liveflux/ws': src('../../packages/ws/src/index.ts'),
       '@liveflux/react': src('../../packages/react/src/index.tsx'),
+      '@liveflux/devtools/react': src('../../packages/devtools/src/react.ts'),
+      '@liveflux/devtools/element': src('../../packages/devtools/src/element.ts'),
+      '@liveflux/devtools': src('../../packages/devtools/src/index.ts'),
     },
   },
 });

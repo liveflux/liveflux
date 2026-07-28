@@ -16,6 +16,9 @@ export type {
   LivefluxClientOptions,
   SubscribeConfig,
   Subscription,
+  ClientObserver,
+  ObservedSubscription,
+  DiagnosisReport,
 } from './client/liveflux-client';
 
 /**
@@ -30,6 +33,12 @@ export type {
   SubscribeRequest,
   StreamAdapter,
 } from './types';
+
+/**
+ * Typed errors (every error Liveflux raises is a LivefluxError subclass)
+ */
+export { LivefluxError, ConnectionError, AdapterError, SchemaValidationError } from './errors';
+export type { LivefluxErrorCode, LivefluxErrorOptions, SchemaValidationDetails } from './errors';
 
 /**
  * Public configuration
