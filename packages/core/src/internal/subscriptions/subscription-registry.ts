@@ -85,6 +85,11 @@ export class SubscriptionRegistry {
     return this.#channels.size;
   }
 
+  /** Number of active listeners on `channel` (0 when not subscribed). Used by `diagnose`. */
+  listenerCount(channel: string): number {
+    return this.#channels.get(channel)?.listeners.size ?? 0;
+  }
+
   /** Tear down every wire subscription (e.g., on client destroy). */
   clear(): void {
     for (const entry of this.#channels.values()) this.#wire.unsubscribe(entry.subId);
