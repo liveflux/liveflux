@@ -5,11 +5,6 @@ description: Notable changes and releases across the Liveflux packages.
 
 Notable changes to Liveflux.
 
-<Callout type="warn">
-  Liveflux is **pre-alpha**. The API is still settling, so minor versions may contain
-  breaking changes until 1.0.
-</Callout>
-
 ## 0.2.0 — Bidirectional: client → server (October 2026)
 
 Liveflux is no longer read-only. Clients can now **send to the server**, with the same type-safety and resilience as reading:
@@ -20,3 +15,15 @@ Liveflux is no longer read-only. Clients can now **send to the server**, with th
 - **`@liveflux/devtools`** now taps commands too: outbound publishes and requests appear with their status (pending → resolved / rejected) and timing.
 
 All packages are released together at **0.2.0**. (The docs site also picked up the latest Next.js security patches.)
+
+## 0.1.0 — Initial release (July 2026)
+
+The first public release — a framework-agnostic realtime-state engine with swappable transports:
+
+- **`@liveflux/core`** — connection, subscriptions, store, reconnect with backoff, and backpressure.
+- **`@liveflux/react`** — the `useStream` hook, `LivefluxProvider`, and a status/error surface.
+- **Adapters** — `@liveflux/ws` (generic WebSocket), `@liveflux/sse` (Server-Sent Events, reconnect + cursor resume), `@liveflux/socketio` (wraps an existing Socket.IO client), `@liveflux/graphql-ws` (graphql-transport-ws, zero-dependency), and `@liveflux/phoenix` (Phoenix Channels v2: joins, rejoin backoff, heartbeat).
+- **`@liveflux/devtools`** — a dev-only panel (`npm i -D`) for inspecting any client at runtime.
+- **`create-liveflux`** — an interactive scaffolder (`pnpm create liveflux@latest`).
+
+TypeScript-first and tree-shakeable throughout; React reads go through `useSyncExternalStore` for tear-free state.
