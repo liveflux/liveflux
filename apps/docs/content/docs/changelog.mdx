@@ -26,3 +26,14 @@ The current shape of the project:
 - **`create-liveflux`** — an interactive scaffolder (`pnpm create liveflux@latest`) that sets up the client and installs the packages for your framework and transport.
 
 Everything is TypeScript-first and tree-shakeable, and reads go through `useSyncExternalStore` for tear-free React state. Follow along on [GitHub](https://github.com/liveflux/liveflux).
+
+## 0.2.0 — Bidirectional: client → server (October 2026)
+
+Liveflux is no longer read-only. Clients can now **send to the server**, with the same type-safety and resilience as reading:
+
+- **`publish`** — fire-and-forget commands, with an opt-in offline outbox (queue while disconnected, flush in order on reconnect, drop-oldest + TTL) and optional idempotency keys.
+- **`request` (RPC)** — correlated request/reply with typed results, per-request timeouts, cancellation via `AbortSignal`, and in-flight backpressure.
+- Shipped across **every adapter** — `ws`, `sse`, `socketio`, `graphql-ws`, and `phoenix` — each proven against the shared adapter-conformance suite, so behaviour is identical on every transport.
+- **`@liveflux/devtools`** now taps commands too: outbound publishes and requests appear with their status (pending → resolved / rejected) and timing.
+
+All packages are released together at **0.2.0**. (The docs site also picked up the latest Next.js security patches.)
