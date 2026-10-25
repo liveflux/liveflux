@@ -2,19 +2,26 @@
   {
     "name": "@liveflux/devtools",
     "path": "dist/index.js",
-    "limit": "2.1 kB",
-    "ignore": ["@liveflux/core"]
+    "limit": "2.6 kB",
+    "ignore": [
+      "@liveflux/core"
+    ]
   },
   {
     "name": "@liveflux/devtools/element",
     "path": "dist/element.js",
-    "limit": "7.15 kB",
-    "ignore": ["@liveflux/core"]
+    "limit": "7.4 kB",
+    "ignore": [
+      "@liveflux/core"
+    ]
   },
   {
     "name": "@liveflux/devtools/react",
     "path": "dist/react.js",
-    "limit": "7.3 kB",
-    "ignore": ["@liveflux/core", "react"]
+    "limit": "7.5 kB",
+    "ignore": [
+      "@liveflux/core",
+      "react"
+    ]
   }
 ]

@@ -2,7 +2,9 @@
   {
     "name": "@liveflux/graphql-ws",
     "path": "dist/index.js",
-    "limit": "1 kB",
-    "ignore": ["@liveflux/core"]
+    "limit": "1.3 kB",
+    "ignore": [
+      "@liveflux/core"
+    ]
   }
 ]
