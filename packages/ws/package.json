@@ -1,6 +1,6 @@
 {
   "name": "@liveflux/ws",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Generic WebSocket adapter for Liveflux — works with any backend that exposes a plain WebSocket, in any language.",
   "keywords": [
     "websocket",
