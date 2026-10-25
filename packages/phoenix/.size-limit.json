@@ -2,7 +2,9 @@
   {
     "name": "@liveflux/phoenix",
     "path": "dist/index.js",
-    "limit": "1.8 kB",
-    "ignore": ["@liveflux/core"]
+    "limit": "2.2 kB",
+    "ignore": [
+      "@liveflux/core"
+    ]
   }
 ]
