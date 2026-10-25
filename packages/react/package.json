@@ -1,6 +1,6 @@
 {
   "name": "@liveflux/react",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "React binding for Liveflux — the useStream hook for typed, reconnect-safe realtime state.",
   "keywords": [
     "react",

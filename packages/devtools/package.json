@@ -1,6 +1,6 @@
 {
   "name": "@liveflux/devtools",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Dev-only observability tooling for Liveflux — an event bus, redaction, and client discovery a DevTools panel builds on. Install as a devDependency; stripped from production.",
   "keywords": [
     "liveflux",

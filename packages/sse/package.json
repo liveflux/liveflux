@@ -1,6 +1,6 @@
 {
   "name": "@liveflux/sse",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Server-Sent Events (SSE) adapter for Liveflux — an EventSource stream with reconnect and cursor resume, for any backend in any language.",
   "keywords": [
     "sse",

@@ -1,6 +1,6 @@
 {
   "name": "@liveflux/graphql-ws",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "graphql-transport-ws adapter for Liveflux — GraphQL subscriptions over WebSocket, spoken directly with zero dependencies.",
   "keywords": [
     "graphql",

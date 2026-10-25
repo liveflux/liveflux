@@ -1,6 +1,6 @@
 {
   "name": "@liveflux/socketio",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Socket.IO adapter for Liveflux — wrap an existing Socket.IO client socket into a normalized, reconnect-safe event stream.",
   "keywords": [
     "socket.io",
