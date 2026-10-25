@@ -38,12 +38,19 @@ class FakeSocket {
   }
 }
 
-function recorder(): AdapterHandlers & { opens: number; closes: number; errors: unknown[]; events: NormalizedEvent[] } {
+function recorder(): AdapterHandlers & {
+  opens: number;
+  closes: number;
+  errors: unknown[];
+  events: NormalizedEvent[];
+  replies: unknown[];
+} {
   const rec = {
     opens: 0,
     closes: 0,
     errors: [] as unknown[],
     events: [] as NormalizedEvent[],
+    replies: [] as unknown[],
     onOpen() {
       rec.opens += 1;
     },
@@ -55,6 +62,9 @@ function recorder(): AdapterHandlers & { opens: number; closes: number; errors: 
     },
     onEvent(ev: NormalizedEvent) {
       rec.events.push(ev);
+    },
+    onReply(reply: unknown) {
+      rec.replies.push(reply);
     },
   };
   return rec;
@@ -169,5 +179,74 @@ describe('@liveflux/graphql-ws', () => {
     const adapter = graphqlWs('wss://x.test/graphql');
     // no global WebSocket in this Node test env
     expect(() => adapter.connect(recorder())).toThrow(/WebSocket/);
+  });
+
+  describe('publish + request (bidirectional)', () => {
+    it('publishes a fire-and-forget mutation and discards its result', () => {
+      const h = harness({});
+      h.latest().open();
+      h.adapter.publish?.({ channel: 'orders', event: 'create', payload: { sku: 'A1' }, meta: { r: 1 } });
+      const cmd = h.latest().sent.find((m) => m.type === 'subscribe');
+      expect(cmd).toEqual({
+        id: 'cmd-1',
+        type: 'subscribe',
+        payload: { query: 'orders', variables: { event: 'create', payload: { sku: 'A1' }, meta: { r: 1 } } },
+      });
+      // its result must NOT surface as an event, and its error must NOT surface as onError
+      h.latest().serverSend({ id: 'cmd-1', type: 'next', payload: { data: { id: 9 } } });
+      h.latest().serverSend({ id: 'cmd-1', type: 'error', payload: [{ message: 'ignored' }] });
+      expect(h.rec.events).toEqual([]);
+      expect(h.rec.errors).toEqual([]);
+    });
+
+    it('carries an idempotencyKey in the mutation variables', () => {
+      const h = harness({});
+      h.latest().open();
+      h.adapter.publish?.({ channel: 'orders', event: 'create', payload: 1, idempotencyKey: 'k-1' });
+      const cmd = h.latest().sent.find((m) => m.type === 'subscribe');
+      expect((cmd?.payload as { variables: unknown }).variables).toEqual({
+        event: 'create',
+        payload: 1,
+        idempotencyKey: 'k-1',
+      });
+    });
+
+    it('routes a request mutation `next` result to onReply, then completes', () => {
+      const h = harness({});
+      h.latest().open();
+      h.adapter.request?.({ requestId: 'rq_1', channel: 'orders', event: 'create', payload: { sku: 'A1' } });
+      const cmd = h.latest().sent.find((m) => m.id === 'rq_1');
+      expect(cmd).toEqual({
+        id: 'rq_1',
+        type: 'subscribe',
+        payload: { query: 'orders', variables: { event: 'create', payload: { sku: 'A1' } } },
+      });
+
+      h.latest().serverSend({ id: 'rq_1', type: 'next', payload: { data: { id: 7 } } });
+      h.latest().serverSend({ id: 'rq_1', type: 'complete' });
+      expect(h.rec.replies).toEqual([{ requestId: 'rq_1', ok: true, payload: { id: 7 } }]);
+      expect(h.rec.events).toEqual([]);
+    });
+
+    it('routes a request-scoped `error` to onReply as a rejected reply (not onError)', () => {
+      const h = harness({});
+      h.latest().open();
+      h.adapter.request?.({ requestId: 'rq_2', channel: 'orders', event: 'create', payload: {} });
+      h.latest().serverSend({ id: 'rq_2', type: 'error', payload: [{ message: 'boom' }] });
+      expect(h.rec.replies).toEqual([
+        { requestId: 'rq_2', ok: false, error: { data: [{ message: 'boom' }] } },
+      ]);
+      expect(h.rec.errors).toEqual([]);
+    });
+
+    it('rejects a request whose result carries GraphQL errors', () => {
+      const h = harness({});
+      h.latest().open();
+      h.adapter.request?.({ requestId: 'rq_3', channel: 'orders', event: 'create', payload: {} });
+      h.latest().serverSend({ id: 'rq_3', type: 'next', payload: { errors: [{ message: 'nope' }] } });
+      expect(h.rec.replies).toEqual([
+        { requestId: 'rq_3', ok: false, error: { data: [{ message: 'nope' }] } },
+      ]);
+    });
   });
 });

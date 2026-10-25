@@ -1,4 +1,11 @@
-import type { Cursor, NormalizedEvent, SubscribeRequest } from '@liveflux/core';
+import type {
+  Cursor,
+  NormalizedEvent,
+  PublishRequest,
+  ReplyFrame,
+  RequestFrame,
+  SubscribeRequest,
+} from '@liveflux/core';
 import { type AdapterHarness, runAdapterConformance } from '@liveflux/adapter-tests';
 import { phoenix, type PhoenixMessage, type PhoenixOptions } from './index';
 
@@ -67,6 +74,44 @@ function leaveSubId(raw: string): string | null {
   return event === 'phx_leave' && joinRef !== null ? recoverSubId(joinRef) : null;
 }
 
+/** Phoenix protocol/lifecycle events — anything else on the wire is an app command (publish/request). */
+const PROTOCOL_EVENTS = new Set([
+  'phx_join',
+  'phx_leave',
+  'phx_reply',
+  'phx_error',
+  'phx_close',
+  'heartbeat',
+]);
+
+/** The `{ payload, meta? }` envelope the adapter wraps a command's body in (see `commandPayload`). */
+interface CommandEnvelope {
+  payload: unknown;
+  meta?: Record<string, unknown>;
+}
+
+/** A fire-and-forget push (`ref === null`, app event) decoded back to a `PublishRequest`. */
+function publishFrame(raw: string): PublishRequest | null {
+  const [, ref, topic, event, payload] = JSON.parse(raw) as PhoenixMessage;
+  if (PROTOCOL_EVENTS.has(event) || ref !== null) return null;
+  const env = (payload ?? {}) as CommandEnvelope;
+  return { channel: topic, event, payload: env.payload, ...(env.meta !== undefined ? { meta: env.meta } : {}) };
+}
+
+/** A request push (`ref === the requestId`, app event) decoded back to a `RequestFrame`. */
+function requestFrame(raw: string): RequestFrame | null {
+  const [, ref, topic, event, payload] = JSON.parse(raw) as PhoenixMessage;
+  if (PROTOCOL_EVENTS.has(event) || ref === null) return null;
+  const env = (payload ?? {}) as CommandEnvelope;
+  return {
+    requestId: ref,
+    channel: topic,
+    event,
+    payload: env.payload,
+    ...(env.meta !== undefined ? { meta: env.meta } : {}),
+  };
+}
+
 /**
  * Phoenix Channels carry no native since-cursor slot, so the reference server encodes the full
  * `NormalizedEvent` into a small payload envelope and a matching `decode` lifts `cursor` / `meta`
@@ -131,6 +176,29 @@ runAdapterConformance({
         allSent()
           .map(leaveSubId)
           .filter((id): id is string => id !== null),
+      sentPublishes: () =>
+        allSent()
+          .map(publishFrame)
+          .filter((p): p is PublishRequest => p !== null),
+      sentRequests: () =>
+        allSent()
+          .map(requestFrame)
+          .filter((r): r is RequestFrame => r !== null),
+      // Play the server: echo a `phx_reply` carrying the request's `ref` (its requestId). Routing is
+      // by ref, so the topic only needs to be a valid string — recover it from the sent request.
+      deliverReply: (reply: ReplyFrame) => {
+        const req = allSent()
+          .map(requestFrame)
+          .find((r): r is RequestFrame => r !== null && r.requestId === reply.requestId);
+        const frame: PhoenixMessage = [
+          null,
+          reply.requestId,
+          req?.channel ?? '',
+          'phx_reply',
+          { status: reply.ok ? 'ok' : 'error', response: reply.ok ? reply.payload : reply.error },
+        ];
+        latest().emit(JSON.stringify(frame));
+      },
       // `@liveflux/phoenix` does not implement the optional `resume` capability (Phoenix Channels
       // have no native since-cursor), so the resume scenario is skipped for it (no `sentResumes`).
     };

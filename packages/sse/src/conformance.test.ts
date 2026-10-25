@@ -1,4 +1,10 @@
-import type { NormalizedEvent, SubscribeRequest } from '@liveflux/core';
+import type {
+  NormalizedEvent,
+  PublishRequest,
+  ReplyFrame,
+  RequestFrame,
+  SubscribeRequest,
+} from '@liveflux/core';
 import {
   type AdapterHarness,
   type ResumeFrame,
@@ -76,6 +82,28 @@ runAdapterConformance({
         sent
           .filter((f): f is Extract<SseControlFrame, { type: 'resume' }> => f.type === 'resume')
           .map((f) => ({ subId: f.subId, cursor: f.cursor })),
+      sentPublishes: (): PublishRequest[] =>
+        sent
+          .filter((f): f is Extract<SseControlFrame, { type: 'publish' }> => f.type === 'publish')
+          .map((f) => ({
+            channel: f.channel,
+            event: f.event,
+            payload: f.payload,
+            ...(f.meta !== undefined ? { meta: f.meta } : {}),
+          })),
+      sentRequests: (): RequestFrame[] =>
+        sent
+          .filter((f): f is Extract<SseControlFrame, { type: 'request' }> => f.type === 'request')
+          .map((f) => ({
+            requestId: f.requestId,
+            channel: f.channel,
+            event: f.event,
+            payload: f.payload,
+            ...(f.meta !== undefined ? { meta: f.meta } : {}),
+          })),
+      // Play the server: push the reply back down the event stream; the adapter's decodeReply routes
+      // it to onReply.
+      deliverReply: (reply: ReplyFrame) => latest().emit(JSON.stringify({ type: 'reply', ...reply })),
       // EventSource collapses transient + permanent failures into one error signal, which the adapter
       // maps to onClose (so the core reconnects). It has no distinct onError seam and no keepalive
       // frame, so those optional scenarios are skipped. onError-on-control-failure is unit-tested.

@@ -67,4 +67,44 @@ export type DevtoolsEvent =
       readonly clientId: string;
       readonly error: DevtoolsErrorInfo;
       readonly at: number;
+    }
+  | {
+      readonly t: 'publish:out';
+      readonly clientId: string;
+      readonly channel: string;
+      readonly event: string;
+      /** Redacted, deep-cloned copy of the payload — safe to display. */
+      readonly payload: unknown;
+      /** Approximate serialized size of the original payload, in characters. */
+      readonly bytes: number;
+      readonly idempotencyKey?: string;
+      /** `true` when held in the offline outbox (connection not open) rather than sent now. */
+      readonly queued: boolean;
+      readonly at: number;
+    }
+  | {
+      readonly t: 'request:out';
+      readonly clientId: string;
+      readonly requestId: string;
+      readonly channel: string;
+      readonly event: string;
+      /** Redacted, deep-cloned copy of the payload — safe to display. */
+      readonly payload: unknown;
+      /** Approximate serialized size of the original payload, in characters. */
+      readonly bytes: number;
+      readonly idempotencyKey?: string;
+      /** `true` when held in the offline outbox (connection not open) rather than sent now. */
+      readonly queued: boolean;
+      readonly at: number;
+    }
+  | {
+      readonly t: 'request:settle';
+      readonly clientId: string;
+      readonly requestId: string;
+      readonly outcome: 'resolved' | 'rejected';
+      /** Present on a resolved request — redacted reply payload. */
+      readonly payload?: unknown;
+      /** Present on a rejected request — a compact error description. */
+      readonly error?: DevtoolsErrorInfo;
+      readonly at: number;
     };

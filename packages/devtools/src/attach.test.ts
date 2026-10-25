@@ -93,3 +93,73 @@ describe('attachDevtools', () => {
     expect(captured.bus.getBuffer().some((e) => e.t === 'client:destroy')).toBe(true);
   });
 });
+
+/** A publish/request-capable adapter that can also deliver a correlated reply. */
+class RpcAdapter implements StreamAdapter {
+  handlers: AdapterHandlers | null = null;
+  connect(handlers: AdapterHandlers): void {
+    this.handlers = handlers;
+    handlers.onOpen();
+  }
+  disconnect(): void {}
+  subscribe(_req: SubscribeRequest): void {}
+  unsubscribe(_subId: string): void {}
+  publish(): void {}
+  request(): void {}
+  reply(requestId: string, ok: boolean, body: { payload?: unknown; error?: { message?: string; code?: string } }): void {
+    this.handlers?.onReply?.({ requestId, ok, ...body });
+  }
+}
+
+describe('attachDevtools — commands (publish / request)', () => {
+  it('emits publish:out with the payload redacted and the queued flag', () => {
+    const client = new LivefluxClient({ adapter: new RpcAdapter() });
+    attachDevtools(client);
+    client.connect();
+
+    client.publish('orders', 'create', { token: 'super-secret', sku: 'A1' }, { idempotencyKey: 'k-1' });
+    const out = buffer().find((e) => e.t === 'publish:out');
+    expect(out).toMatchObject({
+      t: 'publish:out',
+      channel: 'orders',
+      event: 'create',
+      idempotencyKey: 'k-1',
+      queued: false,
+    });
+    expect((out as { payload: Record<string, unknown> }).payload).toEqual({
+      token: '«redacted»',
+      sku: 'A1',
+    });
+  });
+
+  it('emits request:out then request:settle(resolved) with a redacted reply payload', async () => {
+    const adapter = new RpcAdapter();
+    const client = new LivefluxClient({ adapter });
+    attachDevtools(client);
+    client.connect();
+
+    const p = client.request('orders', 'create', { sku: 'A1' });
+    const out = buffer().find((e) => e.t === 'request:out');
+    expect(out).toMatchObject({ t: 'request:out', requestId: 'req-1', channel: 'orders', event: 'create' });
+
+    adapter.reply('req-1', true, { payload: { id: 7, token: 'leak' } });
+    await expect(p).resolves.toEqual({ id: 7, token: 'leak' });
+    const settle = buffer().find((e) => e.t === 'request:settle');
+    expect(settle).toMatchObject({ t: 'request:settle', requestId: 'req-1', outcome: 'resolved' });
+    expect((settle as { payload: Record<string, unknown> }).payload).toEqual({ id: 7, token: '«redacted»' });
+  });
+
+  it('emits request:settle(rejected) with a compact error description', async () => {
+    const adapter = new RpcAdapter();
+    const client = new LivefluxClient({ adapter });
+    attachDevtools(client);
+    client.connect();
+
+    const p = client.request('orders', 'create', {});
+    adapter.reply('req-1', false, { error: { message: 'nope', code: 'BAD' } });
+    await expect(p).rejects.toBeTruthy();
+    const settle = buffer().find((e) => e.t === 'request:settle');
+    expect(settle).toMatchObject({ t: 'request:settle', requestId: 'req-1', outcome: 'rejected' });
+    expect((settle as { error: { code?: string } }).error).toMatchObject({ code: 'REQUEST_FAILED' });
+  });
+});

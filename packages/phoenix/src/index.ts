@@ -1,6 +1,9 @@
 import type {
   AdapterHandlers,
   NormalizedEvent,
+  PublishRequest,
+  ReplyFrame,
+  RequestFrame,
   StreamAdapter,
   SubscribeRequest,
 } from '@liveflux/core';
@@ -189,6 +192,41 @@ function subIdOf(joinRef: string): string {
 }
 
 /**
+ * Wire body for a Liveflux command (publish / request). Phoenix Channels carry no out-of-band slot,
+ * so `meta` and `idempotencyKey` ride in a small envelope alongside the app payload — always under a
+ * `payload` key so the value round-trips losslessly even when it is itself a `{ payload }` object.
+ */
+function commandPayload(req: PublishRequest | RequestFrame): unknown {
+  return {
+    payload: req.payload,
+    ...(req.meta !== undefined ? { meta: req.meta } : {}),
+    ...(req.idempotencyKey !== undefined ? { idempotencyKey: req.idempotencyKey } : {}),
+  };
+}
+
+/**
+ * Map a Phoenix `phx_reply` body (`{ status, response }`) for a client request to a core `ReplyFrame`,
+ * correlated by the `ref` we sent as the request id. `status: 'ok'` resolves with `response`; anything
+ * else rejects, lifting a string `message` / `code` out of `response` when present and keeping the raw
+ * body as `data`.
+ */
+function phoenixReply(requestId: string, body: unknown): ReplyFrame {
+  const env = (body ?? {}) as { status?: unknown; response?: unknown };
+  if (env.status === 'ok') return { requestId, ok: true, payload: env.response };
+  const response = env.response;
+  const r = (response ?? {}) as { message?: unknown; code?: unknown };
+  return {
+    requestId,
+    ok: false,
+    error: {
+      ...(typeof r.message === 'string' ? { message: r.message } : {}),
+      ...(typeof r.code === 'string' ? { code: r.code } : {}),
+      data: response,
+    },
+  };
+}
+
+/**
  * Phoenix Channels adapter for `@liveflux/core`. Speaks the hand-rolled Phoenix **v2** serializer —
  * each message is a JSON array `[join_ref, ref, topic, event, payload]` — with **zero runtime
  * dependencies** (it does not use the `phoenix` npm package).
@@ -255,6 +293,15 @@ export function phoenix(url: string, options: PhoenixOptions = {}): StreamAdapte
   const nextRef = (): string => String(++refCounter);
   const isOpen = (): boolean => socket !== null && socket.readyState === OPEN;
   const hasActiveTopic = (topic: string): boolean => topicCount.has(topic);
+
+  // The current (live) join_ref for a topic — a Phoenix push must be scoped to a joined channel
+  // instance. `null` if nothing is joined on that topic (the server then can't route the push).
+  const joinRefForTopic = (topic: string): string | null => {
+    for (const [subId, entry] of active) {
+      if (entry.topic === topic) return currentJoinRef.get(subId) ?? null;
+    }
+    return null;
+  };
 
   const safeSend = (s: WebSocketLike, data: string): void => {
     try {
@@ -351,7 +398,13 @@ export function phoenix(url: string, options: PhoenixOptions = {}): StreamAdapte
       // the topic's re-join backoff, any other reply is silently consumed.
       if (ref === null) return;
       const pending = pendingJoins.get(ref);
-      if (pending === undefined) return;
+      if (pending === undefined) {
+        // Not a pending join → a reply to a client `request` (its `ref` is the Liveflux requestId).
+        // Route it to onReply; the core matches it to its pending request, or ignores an unknown one
+        // (stateless, so a request that never replies leaks nothing here).
+        h.onReply?.(phoenixReply(ref, message[4]));
+        return;
+      }
       timers.clearTimeout(pending.timer);
       pendingJoins.delete(ref);
       // Stale-instance filter: a newer join for this sub has superseded this in-flight one → ignore
@@ -470,6 +523,22 @@ export function phoenix(url: string, options: PhoenixOptions = {}): StreamAdapte
       const ref = nextRef();
       heartbeatRef = ref;
       sink.write(encode([null, ref, HEARTBEAT_TOPIC, HEARTBEAT, {}]));
+    },
+
+    publish(req: PublishRequest): void {
+      // Fire-and-forget push on the channel: `ref: null` signals no reply is expected (any reply the
+      // server sends anyway carries a null ref and is dropped). Ordered + backpressured via the Outbox,
+      // like a join. The core only calls this while the connection is open.
+      const joinRef = joinRefForTopic(req.channel);
+      outbox.push(encode([joinRef, null, req.channel, req.event, commandPayload(req)]));
+    },
+
+    request(req: RequestFrame): void {
+      // The Liveflux `requestId` rides as the Phoenix `ref`; the server's `phx_reply` echoes it and the
+      // message handler routes it back through onReply. The core owns the requestId, correlation, and
+      // timeout — the adapter is stateless here.
+      const joinRef = joinRefForTopic(req.channel);
+      outbox.push(encode([joinRef, req.requestId, req.channel, req.event, commandPayload(req)]));
     },
   });
 }

@@ -3,9 +3,23 @@ import { StrictMode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { LivefluxClient } from '@liveflux/core';
-import type { AdapterHandlers, StreamAdapter, SubscribeRequest } from '@liveflux/core';
+import type {
+  AdapterHandlers,
+  PublishRequest,
+  ReplyFrame,
+  RequestFrame,
+  StreamAdapter,
+  SubscribeRequest,
+} from '@liveflux/core';
 import type { ReactNode } from 'react';
-import { LivefluxProvider, useConnection, useConnectionStatus, useStream } from './index';
+import {
+  LivefluxProvider,
+  useCommand,
+  useConnection,
+  useConnectionStatus,
+  usePublish,
+  useStream,
+} from './index';
 
 /** Minimal adapter that opens synchronously and lets a test push events. */
 class MockAdapter implements StreamAdapter {
@@ -24,6 +38,17 @@ class MockAdapter implements StreamAdapter {
   }
   unsubscribe(subId: string): void {
     this.active.delete(subId);
+  }
+  readonly published: PublishRequest[] = [];
+  publish(req: PublishRequest): void {
+    this.published.push(req);
+  }
+  readonly requested: RequestFrame[] = [];
+  request(req: RequestFrame): void {
+    this.requested.push(req);
+  }
+  reply(frame: ReplyFrame): void {
+    this.handlers?.onReply?.(frame);
   }
   emit(channel: string, payload: unknown): void {
     this.handlers?.onEvent({ channel, event: 'update', payload });
@@ -262,5 +287,65 @@ describe('useConnectionStatus', () => {
     const err = new Error('transport-boom');
     act(() => adapter.fail(err));
     expect(result.current.error).toBe(err);
+  });
+});
+
+describe('usePublish', () => {
+  it('sends a fire-and-forget command through the client to the adapter', () => {
+    const { adapter, wrapper } = setup();
+    const { result } = renderHook(() => usePublish(), { wrapper });
+    act(() => result.current('orders', 'create', { sku: 'A1' }));
+    expect(adapter.published).toHaveLength(1);
+    expect(adapter.published[0]).toMatchObject({
+      channel: 'orders',
+      event: 'create',
+      payload: { sku: 'A1' },
+    });
+  });
+
+  it('returns a stable function across renders', () => {
+    const { wrapper } = setup();
+    const { result, rerender } = renderHook(() => usePublish(), { wrapper });
+    const first = result.current;
+    rerender();
+    expect(result.current).toBe(first);
+  });
+});
+
+describe('useCommand', () => {
+  it('goes idle → pending → success and exposes the reply data', async () => {
+    const { adapter, wrapper } = setup();
+    const { result } = renderHook(() => useCommand<{ id: number }>('orders', 'create'), { wrapper });
+    expect(result.current.status).toBe('idle');
+
+    act(() => {
+      result.current.mutate({ sku: 'A1' });
+    });
+    expect(result.current.status).toBe('pending');
+
+    const id = adapter.requested.at(-1)!.requestId;
+    await act(async () => {
+      adapter.reply({ requestId: id, ok: true, payload: { id: 7 } });
+    });
+    expect(result.current.status).toBe('success');
+    expect(result.current.data).toEqual({ id: 7 });
+  });
+
+  it('goes pending → error on a server rejection, and reset() clears it', async () => {
+    const { adapter, wrapper } = setup();
+    const { result } = renderHook(() => useCommand('orders', 'create'), { wrapper });
+    act(() => {
+      result.current.mutate({});
+    });
+    const id = adapter.requested.at(-1)!.requestId;
+    await act(async () => {
+      adapter.reply({ requestId: id, ok: false, error: { message: 'nope' } });
+    });
+    expect(result.current.status).toBe('error');
+    expect(result.current.error).toBeTruthy();
+
+    act(() => result.current.reset());
+    expect(result.current.status).toBe('idle');
+    expect(result.current.error).toBeUndefined();
   });
 });

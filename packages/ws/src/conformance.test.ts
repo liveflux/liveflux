@@ -1,4 +1,10 @@
-import type { NormalizedEvent, SubscribeRequest } from '@liveflux/core';
+import type {
+  NormalizedEvent,
+  PublishRequest,
+  ReplyFrame,
+  RequestFrame,
+  SubscribeRequest,
+} from '@liveflux/core';
 import { type AdapterHarness, runAdapterConformance } from '@liveflux/adapter-tests';
 import { ws, type OutboundFrame, type WsOptions } from './index';
 
@@ -59,6 +65,29 @@ function isHeartbeat(raw: string): boolean {
   return (JSON.parse(raw) as OutboundFrame).type === 'heartbeat';
 }
 
+function publishFrame(raw: string): PublishRequest | null {
+  const frame = JSON.parse(raw) as OutboundFrame;
+  if (frame.type !== 'publish') return null;
+  return {
+    channel: frame.channel,
+    event: frame.event,
+    payload: frame.payload,
+    ...(frame.meta !== undefined ? { meta: frame.meta } : {}),
+  };
+}
+
+function requestFrame(raw: string): RequestFrame | null {
+  const frame = JSON.parse(raw) as OutboundFrame;
+  if (frame.type !== 'request') return null;
+  return {
+    requestId: frame.requestId,
+    channel: frame.channel,
+    event: frame.event,
+    payload: frame.payload,
+    ...(frame.meta !== undefined ? { meta: frame.meta } : {}),
+  };
+}
+
 runAdapterConformance({
   name: '@liveflux/ws',
   setup(): AdapterHarness {
@@ -89,6 +118,17 @@ runAdapterConformance({
           .filter((id): id is string => id !== null),
       // Count the keepalive frames ws puts on the wire (`{ type: 'heartbeat' }`).
       sentHeartbeats: () => allSent().filter(isHeartbeat).length,
+      sentPublishes: () =>
+        allSent()
+          .map(publishFrame)
+          .filter((p): p is PublishRequest => p !== null),
+      sentRequests: () =>
+        allSent()
+          .map(requestFrame)
+          .filter((r): r is RequestFrame => r !== null),
+      // Play the server: push a reply frame down the socket; ws decodes it and calls onReply.
+      deliverReply: (reply: ReplyFrame) =>
+        latest().emit(JSON.stringify({ type: 'reply', ...reply })),
       // `@liveflux/ws` does not implement the optional `resume` capability, so the resume scenario
       // is skipped for it (no `sentResumes`). It has no per-channel-error concept either, so it
       // provides no channel-error seam.

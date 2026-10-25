@@ -1,4 +1,10 @@
-import type { NormalizedEvent, SubscribeRequest } from '@liveflux/core';
+import type {
+  NormalizedEvent,
+  PublishRequest,
+  ReplyFrame,
+  RequestFrame,
+  SubscribeRequest,
+} from '@liveflux/core';
 import {
   type AdapterHarness,
   type ResumeFrame,
@@ -78,6 +84,27 @@ runAdapterConformance({
         socket.outbound
           .filter((f) => f.event === 'resume')
           .map((f) => f.args[0] as ResumeFrame),
+      sentPublishes: (): PublishRequest[] =>
+        socket.outbound
+          .filter((f) => f.event === 'publish')
+          .map((f) => f.args[0] as PublishRequest),
+      sentRequests: (): RequestFrame[] =>
+        socket.outbound
+          .filter((f) => f.event === 'request')
+          .map((f) => f.args[0] as RequestFrame),
+      // Play the server: invoke the ack callback of the matching request emit (Socket.IO's native
+      // reply path). The adapter maps the ack value to onReply.
+      deliverReply: (reply: ReplyFrame) => {
+        const match = [...socket.outbound]
+          .reverse()
+          .find(
+            (f) =>
+              f.event === 'request' &&
+              (f.args[0] as RequestFrame).requestId === reply.requestId,
+          );
+        const ack = match?.args[match.args.length - 1];
+        if (typeof ack === 'function') (ack as (r: unknown) => void)(reply);
+      },
       // Socket.IO manages its own Engine.IO ping/pong, so the adapter emits no app-level keepalive —
       // the heartbeat scenario is skipped.
     };

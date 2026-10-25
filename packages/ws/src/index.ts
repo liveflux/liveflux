@@ -1,6 +1,9 @@
 import type {
   AdapterHandlers,
   NormalizedEvent,
+  PublishRequest,
+  ReplyFrame,
+  RequestFrame,
   StreamAdapter,
   SubscribeRequest,
 } from '@liveflux/core';
@@ -24,7 +27,24 @@ type WebSocketCtor = new (url: string, protocols?: string | string[]) => WebSock
 export type OutboundFrame =
   | { type: 'subscribe'; subId: string; channel: string; params?: Record<string, unknown> }
   | { type: 'unsubscribe'; subId: string }
-  | { type: 'heartbeat' };
+  | { type: 'heartbeat' }
+  | {
+      type: 'publish';
+      channel: string;
+      event: string;
+      payload: unknown;
+      meta?: Record<string, unknown>;
+      idempotencyKey?: string;
+    }
+  | {
+      type: 'request';
+      requestId: string;
+      channel: string;
+      event: string;
+      payload: unknown;
+      meta?: Record<string, unknown>;
+      idempotencyKey?: string;
+    };
 
 export interface WsOptions {
   /**
@@ -39,6 +59,12 @@ export interface WsOptions {
    * heartbeats, non-event frames). Default: JSON-parse expecting `{ channel, event, payload }`.
    */
   decode?: (raw: unknown) => NormalizedEvent | null;
+  /**
+   * Decode an inbound message into a `ReplyFrame` (the reply to a client `request`), or return
+   * `null` if it isn't a reply. Tried before `decode`; a match is routed to `onReply` and stops
+   * there. Default: JSON-parse expecting `{ type: 'reply', requestId, ok, payload?, error? }`.
+   */
+  decodeReply?: (raw: unknown) => ReplyFrame | null;
   /**
    * Outbound backpressure high-water mark (bytes). When the socket's `bufferedAmount` reaches this,
    * control frames are queued and flushed as the buffer drains (heartbeats are dropped instead of
@@ -80,6 +106,25 @@ function defaultDecode(raw: unknown): NormalizedEvent | null {
   return null;
 }
 
+function defaultDecodeReply(raw: unknown): ReplyFrame | null {
+  if (typeof raw !== 'string') return null;
+  let msg: unknown;
+  try {
+    msg = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof msg !== 'object' || msg === null) return null;
+  const m = msg as Record<string, unknown>;
+  if (m.type !== 'reply' || typeof m.requestId !== 'string' || typeof m.ok !== 'boolean') return null;
+  return {
+    requestId: m.requestId,
+    ok: m.ok,
+    payload: m.payload,
+    error: m.error as ReplyFrame['error'],
+  };
+}
+
 /**
  * Generic WebSocket adapter for `@liveflux/core`. Works with ANY backend that exposes a plain
  * WebSocket, in any language — it speaks a small JSON control protocol (subscribe / unsubscribe /
@@ -106,6 +151,7 @@ function defaultDecode(raw: unknown): NormalizedEvent | null {
 export function ws(url: string | (() => string), options: WsOptions = {}): StreamAdapter {
   const encode = options.encode ?? JSON.stringify;
   const decode = options.decode ?? defaultDecode;
+  const decodeReply = options.decodeReply ?? defaultDecodeReply;
   const maxBuffered = options.maxBufferedAmount ?? DEFAULT_MAX_BUFFERED;
   const rawMaxMessage = options.maxMessageBytes ?? DEFAULT_MAX_MESSAGE;
   const messageLimit = rawMaxMessage > 0 ? rawMaxMessage : Infinity; // <= 0 disables the cap
@@ -178,6 +224,13 @@ export function ws(url: string | (() => string), options: WsOptions = {}): Strea
         // Transport-level DoS guard: drop oversized string frames before decoding (applies even to
         // a custom decoder). Binary frames carry no `.length` and fall through to the decoder.
         if (typeof raw === 'string' && raw.length > messageLimit) return;
+        // A reply to a client `request` is routed to onReply and stops there; anything else is an
+        // event stream frame.
+        const reply = decodeReply(raw);
+        if (reply) {
+          handlers.onReply?.(reply);
+          return;
+        }
         const event = decode(raw);
         if (event) handlers.onEvent(event);
       };
@@ -213,6 +266,35 @@ export function ws(url: string | (() => string), options: WsOptions = {}): Strea
     heartbeat(): void {
       // Redundant under load — send only when the link can take it immediately; never queue it.
       if (sink.state() === 'ready') sink.write(encode({ type: 'heartbeat' }));
+    },
+
+    publish(req: PublishRequest): void {
+      // Ordered, at-most-once: queue through the Outbox like a subscribe so publishes preserve FIFO
+      // and respect backpressure. The core only calls this while the connection is open.
+      const frame: Extract<OutboundFrame, { type: 'publish' }> = {
+        type: 'publish',
+        channel: req.channel,
+        event: req.event,
+        payload: req.payload,
+        ...(req.meta !== undefined ? { meta: req.meta } : {}),
+        ...(req.idempotencyKey !== undefined ? { idempotencyKey: req.idempotencyKey } : {}),
+      };
+      outbox.push(encode(frame));
+    },
+
+    request(req: RequestFrame): void {
+      // Same ordered Outbox path as publish; the reply arrives as an inbound frame and is routed to
+      // onReply by the message handler. The core owns requestId + correlation + timeout.
+      const frame: Extract<OutboundFrame, { type: 'request' }> = {
+        type: 'request',
+        requestId: req.requestId,
+        channel: req.channel,
+        event: req.event,
+        payload: req.payload,
+        ...(req.meta !== undefined ? { meta: req.meta } : {}),
+        ...(req.idempotencyKey !== undefined ? { idempotencyKey: req.idempotencyKey } : {}),
+      };
+      outbox.push(encode(frame));
     },
   });
 }

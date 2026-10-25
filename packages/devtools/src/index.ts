@@ -27,5 +27,6 @@ export type {
   SubscriptionView,
   EventLogEntry,
   ErrorLogEntry,
+  CommandLogEntry,
   ViewModelCaps,
 } from './view-model';

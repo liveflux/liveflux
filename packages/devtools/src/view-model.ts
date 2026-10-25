@@ -51,6 +51,37 @@ export interface ErrorLogEntry {
   readonly at: number;
 }
 
+/**
+ * A row in the outbound-command log — a `publish` (fire-and-forget, terminal) or a `request` (RPC,
+ * whose `status` advances from `pending` to `resolved`/`rejected` when its settle event folds in).
+ */
+export interface CommandLogEntry {
+  /** Monotonic id (per client), for incremental append. */
+  readonly seq: number;
+  readonly kind: 'publish' | 'request';
+  readonly channel: string;
+  readonly event: string;
+  /** Redacted upstream. */
+  readonly payload: unknown;
+  readonly bytes: number;
+  readonly idempotencyKey?: string;
+  /** `true` when the command was held in the offline outbox rather than sent immediately. */
+  readonly queued: boolean;
+  readonly at: number;
+  /** Requests only — the correlation id. */
+  readonly requestId?: string;
+  /** Requests only — advances from `pending` when the settle event arrives. */
+  readonly status?: 'pending' | 'resolved' | 'rejected';
+  /** Requests only — when the request settled. */
+  readonly settledAt?: number;
+  /** Requests only — settle time minus issue time, once settled. */
+  readonly durationMs?: number;
+  /** Requests only — the redacted reply payload on a resolved request. */
+  readonly result?: unknown;
+  /** Requests only — a compact error on a rejected request. */
+  readonly error?: { readonly name: string; readonly code?: string; readonly message: string };
+}
+
 /** Everything a panel needs to render one client. */
 export interface ClientView {
   readonly id: string;
@@ -61,6 +92,7 @@ export interface ClientView {
   readonly subscriptions: SubscriptionView[];
   readonly events: EventLogEntry[];
   readonly errors: ErrorLogEntry[];
+  readonly commands: CommandLogEntry[];
   readonly eventCount: number;
   readonly lastEventAt?: number;
   readonly createdAt?: number;
@@ -79,13 +111,39 @@ export interface ViewModelCaps {
   events?: number;
   /** Errors kept (default 100). */
   errors?: number;
+  /** Outbound commands kept (default 500). */
+  commands?: number;
 }
 
-const DEFAULT_CAPS: Required<ViewModelCaps> = { timeline: 100, events: 500, errors: 100 };
+const DEFAULT_CAPS: Required<ViewModelCaps> = {
+  timeline: 100,
+  events: 500,
+  errors: 100,
+  commands: 500,
+};
 
 function pushCapped<T>(arr: T[], item: T, cap: number): void {
   arr.push(item);
   if (arr.length > cap) arr.shift();
+}
+
+/** Internal mutable command row (a request's row is updated in place when it settles). */
+interface CommandRow {
+  seq: number;
+  kind: 'publish' | 'request';
+  channel: string;
+  event: string;
+  payload: unknown;
+  bytes: number;
+  idempotencyKey?: string;
+  queued: boolean;
+  at: number;
+  requestId?: string;
+  status?: 'pending' | 'resolved' | 'rejected';
+  settledAt?: number;
+  durationMs?: number;
+  result?: unknown;
+  error?: { name: string; code?: string; message: string };
 }
 
 /**
@@ -108,6 +166,9 @@ export class ClientModel {
   >();
   readonly #events: EventLogEntry[] = [];
   readonly #errors: ErrorLogEntry[] = [];
+  readonly #commands: CommandRow[] = [];
+  /** requestId → its (still-listed) command row, for in-place settle updates. */
+  readonly #pendingCommands = new Map<string, CommandRow>();
 
   constructor(id: string, caps: ViewModelCaps = {}) {
     this.#id = id;
@@ -177,6 +238,59 @@ export class ClientModel {
           this.#caps.errors,
         );
         break;
+      case 'publish:out':
+        this.#pushCommand({
+          seq: this.#seq++,
+          kind: 'publish',
+          channel: event.channel,
+          event: event.event,
+          payload: event.payload,
+          bytes: event.bytes,
+          idempotencyKey: event.idempotencyKey,
+          queued: event.queued,
+          at: event.at,
+        });
+        break;
+      case 'request:out': {
+        const row: CommandRow = {
+          seq: this.#seq++,
+          kind: 'request',
+          channel: event.channel,
+          event: event.event,
+          payload: event.payload,
+          bytes: event.bytes,
+          idempotencyKey: event.idempotencyKey,
+          queued: event.queued,
+          at: event.at,
+          requestId: event.requestId,
+          status: 'pending',
+        };
+        this.#pushCommand(row);
+        this.#pendingCommands.set(event.requestId, row);
+        break;
+      }
+      case 'request:settle': {
+        const row = this.#pendingCommands.get(event.requestId);
+        this.#pendingCommands.delete(event.requestId);
+        if (row) {
+          // Row still listed → settle it in place (unknown/evicted requests are tolerated: skipped).
+          row.status = event.outcome;
+          row.settledAt = event.at;
+          row.durationMs = event.at - row.at;
+          if (event.outcome === 'resolved') row.result = event.payload;
+          else row.error = event.error;
+        }
+        break;
+      }
+    }
+  }
+
+  /** Append a command row, evicting the oldest at cap (and untracking it if it was still pending). */
+  #pushCommand(row: CommandRow): void {
+    this.#commands.push(row);
+    if (this.#commands.length > this.#caps.commands) {
+      const dropped = this.#commands.shift();
+      if (dropped?.requestId) this.#pendingCommands.delete(dropped.requestId);
     }
   }
 
@@ -194,6 +308,7 @@ export class ClientModel {
       subscriptions: [...this.#subs.values()].map((s) => ({ ...s })),
       events: [...this.#events],
       errors: [...this.#errors],
+      commands: this.#commands.map((c) => ({ ...c })),
       eventCount: this.#eventCount,
       lastEventAt: this.#lastEventAt,
       createdAt: this.#createdAt,

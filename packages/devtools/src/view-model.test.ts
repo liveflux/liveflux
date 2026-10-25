@@ -165,4 +165,122 @@ describe('ClientModel', () => {
     }).not.toThrow();
     expect(m.getView().subscriptions).toEqual([]);
   });
+
+  describe('command log (publish / request)', () => {
+    it('folds a publish into a terminal command row', () => {
+      const m = new ClientModel('c1');
+      feed(m, {
+        t: 'publish:out',
+        clientId: 'c1',
+        channel: 'orders',
+        event: 'create',
+        payload: { sku: 'A1' },
+        bytes: 12,
+        idempotencyKey: 'k-1',
+        queued: false,
+        at: 5,
+      });
+      expect(m.getView().commands).toEqual([
+        {
+          seq: 0,
+          kind: 'publish',
+          channel: 'orders',
+          event: 'create',
+          payload: { sku: 'A1' },
+          bytes: 12,
+          idempotencyKey: 'k-1',
+          queued: false,
+          at: 5,
+        },
+      ]);
+    });
+
+    it('folds a request pending, then settles it in place (status + duration + result)', () => {
+      const m = new ClientModel('c1');
+      feed(m, {
+        t: 'request:out',
+        clientId: 'c1',
+        requestId: 'req-1',
+        channel: 'orders',
+        event: 'create',
+        payload: { sku: 'A1' },
+        bytes: 12,
+        queued: false,
+        at: 10,
+      });
+      expect(m.getView().commands[0]).toMatchObject({ kind: 'request', requestId: 'req-1', status: 'pending' });
+
+      feed(m, {
+        t: 'request:settle',
+        clientId: 'c1',
+        requestId: 'req-1',
+        outcome: 'resolved',
+        payload: { id: 7 },
+        at: 25,
+      });
+      const row = m.getView().commands[0]!;
+      expect(row).toMatchObject({
+        requestId: 'req-1',
+        status: 'resolved',
+        settledAt: 25,
+        durationMs: 15,
+        result: { id: 7 },
+      });
+      expect(m.getView().commands).toHaveLength(1); // settled in place, not appended
+    });
+
+    it('records a rejected request with its error', () => {
+      const m = new ClientModel('c1');
+      feed(
+        m,
+        {
+          t: 'request:out',
+          clientId: 'c1',
+          requestId: 'req-1',
+          channel: 'orders',
+          event: 'create',
+          payload: {},
+          bytes: 2,
+          queued: false,
+          at: 1,
+        },
+        {
+          t: 'request:settle',
+          clientId: 'c1',
+          requestId: 'req-1',
+          outcome: 'rejected',
+          error: { name: 'RequestError', code: 'REQUEST_FAILED', message: 'nope' },
+          at: 4,
+        },
+      );
+      expect(m.getView().commands[0]).toMatchObject({
+        status: 'rejected',
+        durationMs: 3,
+        error: { name: 'RequestError', code: 'REQUEST_FAILED', message: 'nope' },
+      });
+    });
+
+    it('tolerates a settle for an unknown / evicted request', () => {
+      const m = new ClientModel('c1');
+      expect(() =>
+        m.apply({ t: 'request:settle', clientId: 'c1', requestId: 'ghost', outcome: 'resolved', at: 1 }),
+      ).not.toThrow();
+      expect(m.getView().commands).toEqual([]);
+    });
+
+    it('caps the command log and untracks an evicted pending request', () => {
+      const m = new ClientModel('c1', { commands: 2 });
+      // req-1 is pending, then two more publishes push it past the cap of 2.
+      feed(
+        m,
+        { t: 'request:out', clientId: 'c1', requestId: 'req-1', channel: 'c', event: 'e', payload: 0, bytes: 1, queued: false, at: 1 },
+        { t: 'publish:out', clientId: 'c1', channel: 'c', event: 'e', payload: 0, bytes: 1, queued: false, at: 2 },
+        { t: 'publish:out', clientId: 'c1', channel: 'c', event: 'e', payload: 0, bytes: 1, queued: false, at: 3 },
+      );
+      expect(m.getView().commands).toHaveLength(2); // req-1 evicted
+      // A late settle for the evicted req-1 must NOT resurrect or crash it.
+      feed(m, { t: 'request:settle', clientId: 'c1', requestId: 'req-1', outcome: 'resolved', payload: 9, at: 4 });
+      expect(m.getView().commands.every((c) => c.requestId !== 'req-1')).toBe(true);
+    });
+  });
 });

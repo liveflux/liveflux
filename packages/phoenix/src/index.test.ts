@@ -54,6 +54,7 @@ function handlers() {
     events: [] as unknown[],
     errorValues: [] as unknown[],
     closeReasons: [] as unknown[],
+    replies: [] as unknown[],
     onOpen() {
       h.opens += 1;
     },
@@ -67,6 +68,9 @@ function handlers() {
     },
     onEvent(e: unknown) {
       h.events.push(e);
+    },
+    onReply(reply: unknown) {
+      h.replies.push(reply);
     },
   };
   return h satisfies AdapterHandlers & Record<string, unknown>;
@@ -468,5 +472,90 @@ describe('phoenix adapter', () => {
     adapter.heartbeat?.(); // ref '2' — link is healthy, another heartbeat goes out
     expect(s.readyState).toBe(1);
     expect(frames(s).map((f) => f[1])).toEqual(['1', '2']);
+  });
+
+  describe('publish + request (bidirectional)', () => {
+    it('publishes a fire-and-forget push scoped to the joined channel (ref null)', () => {
+      const adapter = phoenix('wss://x/socket', { WebSocket: MockCtor });
+      adapter.connect(handlers());
+      const s = last();
+      s.open();
+      adapter.subscribe({ subId: 'sub_1', channel: 'orders' }); // join → join_ref 'sub_1#1'
+      s.sent.length = 0; // isolate the publish frame
+
+      adapter.publish?.({ channel: 'orders', event: 'create', payload: { sku: 'A1' }, meta: { r: 1 } });
+      expect(frames(s)).toEqual([
+        ['sub_1#1', null, 'orders', 'create', { payload: { sku: 'A1' }, meta: { r: 1 } }],
+      ]);
+    });
+
+    it('publishes with a null join_ref when the channel is not joined', () => {
+      const adapter = phoenix('wss://x/socket', { WebSocket: MockCtor });
+      adapter.connect(handlers());
+      last().open();
+      adapter.publish?.({ channel: 'orders', event: 'ping', payload: 1 });
+      expect(frames(last())).toEqual([[null, null, 'orders', 'ping', { payload: 1 }]]);
+    });
+
+    it('carries an idempotencyKey in the command envelope', () => {
+      const adapter = phoenix('wss://x/socket', { WebSocket: MockCtor });
+      adapter.connect(handlers());
+      last().open();
+      adapter.publish?.({ channel: 'orders', event: 'create', payload: 1, idempotencyKey: 'k-1' });
+      expect(frames(last())[0]![4]).toEqual({ payload: 1, idempotencyKey: 'k-1' });
+    });
+
+    it('sends a request with the requestId as the Phoenix ref', () => {
+      const adapter = phoenix('wss://x/socket', { WebSocket: MockCtor });
+      adapter.connect(handlers());
+      const s = last();
+      s.open();
+      adapter.subscribe({ subId: 'sub_1', channel: 'orders' });
+      s.sent.length = 0;
+
+      adapter.request?.({ requestId: 'rq_1', channel: 'orders', event: 'create', payload: { sku: 'A1' } });
+      expect(frames(s)).toEqual([['sub_1#1', 'rq_1', 'orders', 'create', { payload: { sku: 'A1' } }]]);
+    });
+
+    it('routes a successful phx_reply for a request to onReply', () => {
+      const adapter = phoenix('wss://x/socket', { WebSocket: MockCtor });
+      const h = handlers();
+      adapter.connect(h);
+      last().open();
+      adapter.request?.({ requestId: 'rq_1', channel: 'orders', event: 'create', payload: {} });
+
+      last().emit(
+        serverFrame([null, 'rq_1', 'orders', 'phx_reply', { status: 'ok', response: { id: 7 } }]),
+      );
+      expect(h.replies).toEqual([{ requestId: 'rq_1', ok: true, payload: { id: 7 } }]);
+      expect(h.events).toEqual([]); // a reply is not an event
+      expect(h.errors).toBe(0); // nor an error
+    });
+
+    it('routes a rejected phx_reply for a request to onReply (ok:false)', () => {
+      const adapter = phoenix('wss://x/socket', { WebSocket: MockCtor });
+      const h = handlers();
+      adapter.connect(h);
+      last().open();
+      adapter.request?.({ requestId: 'rq_2', channel: 'orders', event: 'create', payload: {} });
+
+      last().emit(
+        serverFrame([
+          null,
+          'rq_2',
+          'orders',
+          'phx_reply',
+          { status: 'error', response: { message: 'nope', code: 'BAD' } },
+        ]),
+      );
+      expect(h.replies).toEqual([
+        {
+          requestId: 'rq_2',
+          ok: false,
+          error: { message: 'nope', code: 'BAD', data: { message: 'nope', code: 'BAD' } },
+        },
+      ]);
+      expect(h.errors).toBe(0); // a rejected request is a reply, not a connection error
+    });
   });
 });

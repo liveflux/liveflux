@@ -14,6 +14,8 @@ import type {
   ConnectionState,
   IntoStrategy,
   LivefluxClient,
+  PublishOptions,
+  RequestOptions,
   SubscribeConfig,
   Subscription,
 } from '@liveflux/core';
@@ -240,4 +242,104 @@ export function useConnectionStatus(): ConnectionStatus {
   }, [client]);
 
   return { status, error };
+}
+
+/** The fire-and-forget publish function returned by {@link usePublish}. */
+export type PublishFn = (
+  channel: string,
+  event: string,
+  payload: unknown,
+  opts?: PublishOptions,
+) => void;
+
+/**
+ * Returns a stable function that sends a fire-and-forget command to the server (client→server).
+ * Same client and connection as every `useStream`, so no extra wiring. It throws if the connection
+ * is not open or the transport can't publish — call it from an event handler and handle the error
+ * (a request/response `useCommand` with pending/error state lands in a later version).
+ */
+export function usePublish(): PublishFn {
+  const client = useClient();
+  return useCallback<PublishFn>(
+    (channel, event, payload, opts) => client.publish(channel, event, payload, opts),
+    [client],
+  );
+}
+
+/** Lifecycle of a {@link useCommand} call. */
+export type CommandStatus = 'idle' | 'pending' | 'success' | 'error';
+
+/** The handle returned by {@link useCommand} — a react-query-style mutation over a request/response. */
+export interface CommandResult<Res, Req> {
+  /** Fire the request; updates `status`/`data`/`error`. Rejections are swallowed (read `error`). */
+  mutate: (payload: Req) => void;
+  /** Like `mutate`, but returns the promise so you can `await` and try/catch it. */
+  mutateAsync: (payload: Req) => Promise<Res>;
+  status: CommandStatus;
+  data: Res | undefined;
+  error: unknown;
+  /** Return to the `idle` state, clearing `data`/`error`. */
+  reset: () => void;
+}
+
+/**
+ * Request/response (client→server RPC) as a stateful hook — same client and connection as every
+ * `useStream`, no extra wiring. Call `mutate(payload)` from an event handler; read `status` /
+ * `data` / `error` to drive the UI. Modeled on react-query's `useMutation` for zero learning curve.
+ */
+export function useCommand<Res = unknown, Req = unknown>(
+  channel: string,
+  event: string,
+  opts?: RequestOptions,
+): CommandResult<Res, Req> {
+  const client = useClient();
+  const [state, setState] = useState<{ status: CommandStatus; data: Res | undefined; error: unknown }>({
+    status: 'idle',
+    data: undefined,
+    error: undefined,
+  });
+
+  // Latest opts without destabilizing the callbacks; and a guard against setState after unmount.
+  const optsRef = useRef(opts);
+  optsRef.current = opts;
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const mutateAsync = useCallback(
+    (payload: Req): Promise<Res> => {
+      setState({ status: 'pending', data: undefined, error: undefined });
+      return client.request<Res>(channel, event, payload, optsRef.current).then(
+        (data) => {
+          if (mountedRef.current) setState({ status: 'success', data, error: undefined });
+          return data;
+        },
+        (error) => {
+          if (mountedRef.current) setState({ status: 'error', data: undefined, error });
+          throw error;
+        },
+      );
+    },
+    [client, channel, event],
+  );
+
+  const mutate = useCallback(
+    (payload: Req): void => {
+      void mutateAsync(payload).catch(() => {
+        /* error is captured in state; swallow the rejection so it isn't an unhandled promise */
+      });
+    },
+    [mutateAsync],
+  );
+
+  const reset = useCallback(
+    () => setState({ status: 'idle', data: undefined, error: undefined }),
+    [],
+  );
+
+  return { mutate, mutateAsync, status: state.status, data: state.data, error: state.error, reset };
 }

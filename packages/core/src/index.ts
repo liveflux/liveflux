@@ -14,10 +14,17 @@
 export { LivefluxClient } from './client/liveflux-client';
 export type {
   LivefluxClientOptions,
+  OfflinePolicy,
+  PublishOptions,
+  RequestOptions,
   SubscribeConfig,
   Subscription,
   ClientObserver,
   ObservedSubscription,
+  ObservedPublish,
+  ObservedRequest,
+  ObservedRequestSettle,
+  RequestOutcome,
   DiagnosisReport,
 } from './client/liveflux-client';
 
@@ -31,14 +38,30 @@ export type {
   NormalizedEvent,
   AdapterHandlers,
   SubscribeRequest,
+  PublishRequest,
+  RequestFrame,
+  ReplyFrame,
   StreamAdapter,
 } from './types';
 
 /**
  * Typed errors (every error Liveflux raises is a LivefluxError subclass)
  */
-export { LivefluxError, ConnectionError, AdapterError, SchemaValidationError } from './errors';
-export type { LivefluxErrorCode, LivefluxErrorOptions, SchemaValidationDetails } from './errors';
+export {
+  LivefluxError,
+  ConnectionError,
+  AdapterError,
+  SchemaValidationError,
+  TimeoutError,
+  RequestError,
+  BackpressureError,
+} from './errors';
+export type {
+  LivefluxErrorCode,
+  LivefluxErrorOptions,
+  SchemaValidationDetails,
+  RequestErrorDetails,
+} from './errors';
 
 /**
  * Public configuration

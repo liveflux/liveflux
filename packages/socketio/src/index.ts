@@ -2,6 +2,9 @@ import type {
   AdapterHandlers,
   Cursor,
   NormalizedEvent,
+  PublishRequest,
+  ReplyFrame,
+  RequestFrame,
   StreamAdapter,
   SubscribeRequest,
 } from '@liveflux/core';
@@ -28,6 +31,13 @@ export interface SocketioOptions {
   unsubscribeEvent?: string;
   resumeEvent?: string;
   /**
+   * Client→server event names for the command frames. Defaults: `publish` (fire-and-forget) and
+   * `request` (RPC — sent with a Socket.IO ack callback so the reply rides the native ack, no
+   * requestId echo needed on the wire).
+   */
+  publishEvent?: string;
+  requestEvent?: string;
+  /**
    * Decode an inbound payload (already JSON-parsed by Socket.IO) into a NormalizedEvent, or `null`
    * to ignore it. Default: accept `{ channel, event, payload, cursor?, meta? }` objects.
    */
@@ -47,6 +57,43 @@ function defaultDecode(payload: unknown): NormalizedEvent | null {
 }
 
 type SubscribeFrame = { subId: string; channel: string; params?: Record<string, unknown> };
+
+/** A command frame (publish / request) emitted to the server, carrying meta/idempotencyKey when set. */
+type CommandFrame = {
+  channel: string;
+  event: string;
+  payload: unknown;
+  meta?: Record<string, unknown>;
+  idempotencyKey?: string;
+};
+
+function commandFrame(req: PublishRequest | RequestFrame): CommandFrame {
+  return {
+    channel: req.channel,
+    event: req.event,
+    payload: req.payload,
+    ...(req.meta !== undefined ? { meta: req.meta } : {}),
+    ...(req.idempotencyKey !== undefined ? { idempotencyKey: req.idempotencyKey } : {}),
+  };
+}
+
+/**
+ * Map a Socket.IO ack value to a core `ReplyFrame`, correlated by the requestId we hold in the ack
+ * closure (Socket.IO matches the ack to its emit — no requestId travels on the wire). A `{ ok, … }`
+ * envelope is honoured verbatim; any other bare value is treated as a successful reply carrying it.
+ */
+function ackToReply(requestId: string, response: unknown): ReplyFrame {
+  if (response !== null && typeof response === 'object' && typeof (response as { ok?: unknown }).ok === 'boolean') {
+    const r = response as { ok: boolean; payload?: unknown; error?: ReplyFrame['error'] };
+    return {
+      requestId,
+      ok: r.ok,
+      ...('payload' in r ? { payload: r.payload } : {}),
+      ...(r.error !== undefined ? { error: r.error } : {}),
+    };
+  }
+  return { requestId, ok: true, payload: response };
+}
 
 /**
  * Socket.IO adapter for `@liveflux/core`. Wraps a Socket.IO client `Socket` you already created, so
@@ -69,10 +116,14 @@ export function socketio(socket: SocketLike, options: SocketioOptions = {}): Str
   const subscribeEvent = options.subscribeEvent ?? 'subscribe';
   const unsubscribeEvent = options.unsubscribeEvent ?? 'unsubscribe';
   const resumeEvent = options.resumeEvent ?? 'resume';
+  const publishEvent = options.publishEvent ?? 'publish';
+  const requestEvent = options.requestEvent ?? 'request';
   const decode = options.decode ?? defaultDecode;
 
   // subId → subscribe frame; immutable once created, replayed verbatim on every (re)connect.
   const active = new Map<string, SubscribeFrame>();
+  // The handlers of the live connection — needed by `request` to route a reply into onReply.
+  let boundHandlers: AdapterHandlers | null = null;
   // The currently-attached listeners, so a re-connect detaches cleanly (no leak / double-fire).
   let bound: {
     connect: () => void;
@@ -93,6 +144,7 @@ export function socketio(socket: SocketLike, options: SocketioOptions = {}): Str
   return Object.freeze<StreamAdapter>({
     connect(handlers: AdapterHandlers): void {
       detach(); // idempotent across the core's reconnects — never stack listeners
+      boundHandlers = handlers;
 
       const onConnect = (): void => {
         for (const frame of active.values()) socket.emit(subscribeEvent, frame); // replay
@@ -119,6 +171,7 @@ export function socketio(socket: SocketLike, options: SocketioOptions = {}): Str
 
     disconnect(): void {
       detach(); // detach BEFORE closing so the client-initiated disconnect doesn't fire onClose
+      boundHandlers = null;
       socket.disconnect();
     },
 
@@ -140,6 +193,21 @@ export function socketio(socket: SocketLike, options: SocketioOptions = {}): Str
 
     resume(subId: string, cursor: Cursor | null): void {
       socket.emit(resumeEvent, { subId, cursor });
+    },
+
+    publish(req: PublishRequest): void {
+      // Fire-and-forget: no ack callback. The core only calls this while the connection is open.
+      socket.emit(publishEvent, commandFrame(req));
+    },
+
+    request(req: RequestFrame): void {
+      // RPC over Socket.IO's native ack: the server's ack callback IS the reply, correlated by
+      // Socket.IO itself. The `requestId` still rides on the frame (so the server can log / dedupe),
+      // but the reply is matched by the ack closure, not by the id. The core owns the requestId,
+      // timeout, and cancellation; a reply after teardown is dropped (handlers detached).
+      socket.emit(requestEvent, { requestId: req.requestId, ...commandFrame(req) }, (response: unknown) => {
+        boundHandlers?.onReply?.(ackToReply(req.requestId, response));
+      });
     },
   });
 }

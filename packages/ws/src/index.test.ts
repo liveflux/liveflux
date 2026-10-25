@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AdapterHandlers } from '@liveflux/core';
+import type { AdapterHandlers, ReplyFrame } from '@liveflux/core';
 import { ws, type WsOptions } from './index';
 
 let instances: MockWebSocket[] = [];
@@ -50,6 +50,7 @@ function handlers() {
     closes: 0,
     errors: 0,
     events: [] as unknown[],
+    replies: [] as ReplyFrame[],
     onOpen() {
       h.opens += 1;
     },
@@ -61,6 +62,9 @@ function handlers() {
     },
     onEvent(e: unknown) {
       h.events.push(e);
+    },
+    onReply(r: ReplyFrame) {
+      h.replies.push(r);
     },
   };
   return h satisfies AdapterHandlers & Record<string, unknown>;
@@ -282,5 +286,68 @@ describe('ws adapter', () => {
     last().open();
     last().emit('anything');
     expect(h.events).toEqual([{ channel: 'c', event: 'e', payload: 'anything' }]);
+  });
+});
+
+describe('ws adapter — publish (client→server)', () => {
+  afterEach(() => {
+    instances = [];
+  });
+
+  it('sends a publish frame when the socket is open', () => {
+    const adapter = ws('wss://x', { WebSocket: MockCtor });
+    adapter.connect(handlers());
+    last().open();
+    adapter.publish!({ channel: 'orders', event: 'create', payload: { sku: 'A1' }, meta: { r: 1 } });
+    expect(JSON.parse(last().sent.at(-1)!)).toEqual({
+      type: 'publish',
+      channel: 'orders',
+      event: 'create',
+      payload: { sku: 'A1' },
+      meta: { r: 1 },
+    });
+  });
+
+  it('omits meta from the frame when it is not provided', () => {
+    const adapter = ws('wss://x', { WebSocket: MockCtor });
+    adapter.connect(handlers());
+    last().open();
+    adapter.publish!({ channel: 'orders', event: 'ping', payload: 1 });
+    expect(JSON.parse(last().sent.at(-1)!)).toEqual({
+      type: 'publish',
+      channel: 'orders',
+      event: 'ping',
+      payload: 1,
+    });
+  });
+});
+
+describe('ws adapter — request/reply (client→server RPC)', () => {
+  afterEach(() => {
+    instances = [];
+  });
+
+  it('sends a request frame carrying the requestId when open', () => {
+    const adapter = ws('wss://x', { WebSocket: MockCtor });
+    adapter.connect(handlers());
+    last().open();
+    adapter.request!({ requestId: 'r1', channel: 'orders', event: 'create', payload: { sku: 'A1' } });
+    expect(JSON.parse(last().sent.at(-1)!)).toEqual({
+      type: 'request',
+      requestId: 'r1',
+      channel: 'orders',
+      event: 'create',
+      payload: { sku: 'A1' },
+    });
+  });
+
+  it('routes an inbound reply frame to onReply (not onEvent)', () => {
+    const adapter = ws('wss://x', { WebSocket: MockCtor });
+    const h = handlers();
+    adapter.connect(h);
+    last().open();
+    last().emit(JSON.stringify({ type: 'reply', requestId: 'r1', ok: true, payload: { id: 7 } }));
+    expect(h.replies).toEqual([{ requestId: 'r1', ok: true, payload: { id: 7 }, error: undefined }]);
+    expect(h.events).toHaveLength(0); // a reply is not an event
   });
 });

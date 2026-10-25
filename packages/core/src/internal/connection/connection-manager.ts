@@ -1,4 +1,13 @@
-import type { AdapterHandlers, ConnectionState, NormalizedEvent, StreamAdapter } from '../../types';
+import type {
+  AdapterHandlers,
+  ConnectionState,
+  NormalizedEvent,
+  PublishRequest,
+  ReplyFrame,
+  RequestFrame,
+  StreamAdapter,
+} from '../../types';
+import { ConnectionError } from '../../errors';
 import { backoffDelay, resolveReconnectPolicy, type ReconnectPolicy } from './reconnect';
 
 /** Heartbeat keepalive policy. */
@@ -22,6 +31,8 @@ export interface ConnectionManagerOptions {
   random?: () => number;
   /** Called for every decoded event from the adapter (the client routes these to the registry). */
   onEvent?: (event: NormalizedEvent) => void;
+  /** Called for every correlated reply from the adapter (the client resolves the pending request). */
+  onReply?: (reply: ReplyFrame) => void;
 }
 
 type StateListener = (state: ConnectionState, previous: ConnectionState) => void;
@@ -44,6 +55,7 @@ export class ConnectionManager {
   readonly #heartbeat: HeartbeatPolicy;
   readonly #random: () => number;
   readonly #onEvent: ((event: NormalizedEvent) => void) | undefined;
+  readonly #onReply: ((reply: ReplyFrame) => void) | undefined;
 
   #state: ConnectionState = 'idle';
   #attempts = 0; // consecutive failed reconnects
@@ -67,6 +79,7 @@ export class ConnectionManager {
     };
     this.#random = opts.random ?? Math.random;
     this.#onEvent = opts.onEvent;
+    this.#onReply = opts.onReply;
   }
 
   /** Current connection state. */
@@ -108,6 +121,42 @@ export class ConnectionManager {
     this.#setState('closed');
   }
 
+  /**
+   * Send a fire-and-forget command upstream. Throws a `ConnectionError` when the connection is not
+   * open (default reject-when-closed policy) or when the adapter's transport has no publish path.
+   */
+  publish(req: PublishRequest): void {
+    if (this.#state !== 'open') {
+      throw new ConnectionError(
+        `Cannot publish to "${req.channel}": connection is ${this.#state}, not open.`,
+      );
+    }
+    if (!this.#adapter.publish) {
+      throw new ConnectionError(
+        `Cannot publish to "${req.channel}": this transport does not support client→server publish.`,
+      );
+    }
+    this.#adapter.publish(req);
+  }
+
+  /**
+   * Send a correlated request upstream. Throws a `ConnectionError` when the connection is not open
+   * or when the adapter's transport has no request path. The reply arrives via the `onReply` option.
+   */
+  request(req: RequestFrame): void {
+    if (this.#state !== 'open') {
+      throw new ConnectionError(
+        `Cannot send request to "${req.channel}": connection is ${this.#state}, not open.`,
+      );
+    }
+    if (!this.#adapter.request) {
+      throw new ConnectionError(
+        `Cannot send request to "${req.channel}": this transport does not support client→server request.`,
+      );
+    }
+    this.#adapter.request(req);
+  }
+
   #openAdapter(): void {
     this.#setState(this.#attempts > 0 ? 'reconnecting' : 'connecting');
     const handlers: AdapterHandlers = {
@@ -116,6 +165,9 @@ export class ConnectionManager {
       onError: (err) => this.#emitError(err),
       onEvent: (event) => {
         this.#onEvent?.(event);
+      },
+      onReply: (reply) => {
+        this.#onReply?.(reply);
       },
     };
     this.#adapter.connect(handlers);

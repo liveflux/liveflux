@@ -45,12 +45,14 @@ function recorder(): AdapterHandlers & {
   closes: number;
   errors: unknown[];
   events: NormalizedEvent[];
+  replies: unknown[];
 } {
   const rec = {
     opens: 0,
     closes: 0,
     errors: [] as unknown[],
     events: [] as NormalizedEvent[],
+    replies: [] as unknown[],
     onOpen() {
       rec.opens += 1;
     },
@@ -62,6 +64,9 @@ function recorder(): AdapterHandlers & {
     },
     onEvent(ev: NormalizedEvent) {
       rec.events.push(ev);
+    },
+    onReply(reply: unknown) {
+      rec.replies.push(reply);
     },
   };
   return rec;
@@ -145,5 +150,74 @@ describe('@liveflux/socketio', () => {
     socket.fire('message', { channel: 'orders', event: 'update', payload: 1 });
     expect(rec.closes).toBe(0);
     expect(rec.events).toEqual([]);
+  });
+
+  describe('publish + request (bidirectional)', () => {
+    it('emits a fire-and-forget publish frame (no ack callback)', () => {
+      const socket = new FakeSocket();
+      const adapter = socketio(socket);
+      adapter.connect(recorder());
+      socket.serverConnect();
+
+      adapter.publish?.({ channel: 'orders', event: 'create', payload: { sku: 'A1' }, meta: { r: 1 } });
+      const frame = socket.outbound.find((f) => f.event === 'publish');
+      expect(frame?.args).toEqual([{ channel: 'orders', event: 'create', payload: { sku: 'A1' }, meta: { r: 1 } }]);
+    });
+
+    it('carries an idempotencyKey on the publish frame', () => {
+      const socket = new FakeSocket();
+      const adapter = socketio(socket);
+      adapter.connect(recorder());
+      socket.serverConnect();
+
+      adapter.publish?.({ channel: 'orders', event: 'create', payload: 1, idempotencyKey: 'k-1' });
+      const frame = socket.outbound.find((f) => f.event === 'publish');
+      expect(frame?.args[0]).toEqual({ channel: 'orders', event: 'create', payload: 1, idempotencyKey: 'k-1' });
+    });
+
+    it('emits a request with an ack callback and routes the ack to onReply', () => {
+      const socket = new FakeSocket();
+      const adapter = socketio(socket);
+      const rec = recorder();
+      adapter.connect(rec);
+      socket.serverConnect();
+
+      adapter.request?.({ requestId: 'rq_1', channel: 'orders', event: 'create', payload: { sku: 'A1' } });
+      const frame = socket.outbound.find((f) => f.event === 'request')!;
+      expect(frame.args[0]).toEqual({ requestId: 'rq_1', channel: 'orders', event: 'create', payload: { sku: 'A1' } });
+      const ack = frame.args[frame.args.length - 1] as (r: unknown) => void;
+      expect(typeof ack).toBe('function');
+
+      ack({ ok: true, payload: { id: 7 } }); // server acks
+      expect(rec.replies).toEqual([{ requestId: 'rq_1', ok: true, payload: { id: 7 } }]);
+    });
+
+    it('treats a bare (non-envelope) ack value as a successful reply', () => {
+      const socket = new FakeSocket();
+      const adapter = socketio(socket);
+      const rec = recorder();
+      adapter.connect(rec);
+      socket.serverConnect();
+
+      adapter.request?.({ requestId: 'rq_2', channel: 'orders', event: 'sum', payload: [1, 2] });
+      const ack = socket.outbound.find((f) => f.event === 'request')!.args[1] as (r: unknown) => void;
+      ack(3); // server acks with a bare value
+      expect(rec.replies).toEqual([{ requestId: 'rq_2', ok: true, payload: 3 }]);
+    });
+
+    it('routes an { ok:false } ack to onReply as a rejected reply', () => {
+      const socket = new FakeSocket();
+      const adapter = socketio(socket);
+      const rec = recorder();
+      adapter.connect(rec);
+      socket.serverConnect();
+
+      adapter.request?.({ requestId: 'rq_3', channel: 'orders', event: 'create', payload: {} });
+      const ack = socket.outbound.find((f) => f.event === 'request')!.args[1] as (r: unknown) => void;
+      ack({ ok: false, error: { message: 'nope', code: 'BAD' } });
+      expect(rec.replies).toEqual([
+        { requestId: 'rq_3', ok: false, error: { message: 'nope', code: 'BAD' } },
+      ]);
+    });
   });
 });

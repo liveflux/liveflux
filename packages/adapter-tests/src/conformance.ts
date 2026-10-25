@@ -3,6 +3,9 @@ import type {
   AdapterHandlers,
   Cursor,
   NormalizedEvent,
+  PublishRequest,
+  ReplyFrame,
+  RequestFrame,
   StreamAdapter,
   SubscribeRequest,
 } from '@liveflux/core';
@@ -53,6 +56,23 @@ export interface AdapterHarness {
    */
   sentResumes?(): readonly ResumeFrame[];
   /**
+   * Every publish frame the adapter has sent, in order, decoded to a `PublishRequest`. Provide this
+   * only for adapters that implement the optional `publish` capability; omit it otherwise and the
+   * publish scenario is skipped.
+   */
+  sentPublishes?(): readonly PublishRequest[];
+  /**
+   * Every request frame the adapter has sent, decoded to a `RequestFrame`. Provide this together
+   * with `deliverReply` only for adapters that implement the optional `request` capability; omit it
+   * otherwise and the request/reply scenario is skipped.
+   */
+  sentRequests?(): readonly RequestFrame[];
+  /**
+   * Play the server: deliver a reply on the live connection. The adapter must route it to
+   * `onReply`. Provide it alongside `sentRequests` for request-capable adapters.
+   */
+  deliverReply?(reply: ReplyFrame): MaybePromise<void>;
+  /**
    * How many heartbeat keepalive frames the adapter has put on the wire so far. Provide this only
    * for adapters that emit an observable keepalive frame from `heartbeat()`; omit it otherwise and
    * the heartbeat scenario is skipped.
@@ -81,6 +101,7 @@ interface Recorder extends AdapterHandlers {
   closeReasons: unknown[];
   errorValues: unknown[];
   events: NormalizedEvent[];
+  replies: ReplyFrame[];
 }
 
 function recorder(): Recorder {
@@ -91,6 +112,7 @@ function recorder(): Recorder {
     closeReasons: [],
     errorValues: [],
     events: [],
+    replies: [],
     onOpen() {
       rec.opens += 1;
     },
@@ -104,6 +126,9 @@ function recorder(): Recorder {
     },
     onEvent(event: NormalizedEvent) {
       rec.events.push(event);
+    },
+    onReply(reply: ReplyFrame) {
+      rec.replies.push(reply);
     },
   };
   return rec;
@@ -324,6 +349,52 @@ export function runAdapterConformance(options: AdapterConformanceOptions): void 
           { subId: 'sub_1', cursor: 'cursor-1' },
           { subId: 'sub_1', cursor: null },
         ]);
+      });
+    });
+
+    it('publishes a fire-and-forget command when the adapter supports it (optional)', async () => {
+      await withHarness(async (h) => {
+        const publish = h.adapter.publish;
+        if (typeof publish !== 'function' || typeof h.sentPublishes !== 'function') return; // capability absent → skip
+        await h.open();
+        publish.call(h.adapter, {
+          channel: 'orders',
+          event: 'create',
+          payload: { sku: 'A1' },
+          meta: { r: 1 },
+        });
+        expect(h.sentPublishes()).toEqual([
+          { channel: 'orders', event: 'create', payload: { sku: 'A1' }, meta: { r: 1 } },
+        ]);
+      });
+    });
+
+    it('sends a faithful request frame and routes the reply to onReply (optional)', async () => {
+      await withHarness(async (h, rec) => {
+        const request = h.adapter.request;
+        if (
+          typeof request !== 'function' ||
+          typeof h.sentRequests !== 'function' ||
+          typeof h.deliverReply !== 'function'
+        ) {
+          return; // capability absent → skip
+        }
+        await h.open();
+        request.call(h.adapter, {
+          requestId: 'rq_1',
+          channel: 'orders',
+          event: 'create',
+          payload: { sku: 'A1' },
+          meta: { r: 1 },
+        });
+        expect(h.sentRequests()).toEqual([
+          { requestId: 'rq_1', channel: 'orders', event: 'create', payload: { sku: 'A1' }, meta: { r: 1 } },
+        ]);
+
+        await h.deliverReply({ requestId: 'rq_1', ok: true, payload: { id: 7 } });
+        expect(rec.replies).toHaveLength(1);
+        expect(rec.replies[0]).toMatchObject({ requestId: 'rq_1', ok: true, payload: { id: 7 } });
+        expect(rec.events).toHaveLength(0); // a reply is not an event
       });
     });
 

@@ -108,4 +108,41 @@ describe('attachLogger', () => {
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
   });
+
+  it('logs publish, request, and settle at info (rejected settle at warn)', async () => {
+    class RpcAdapter implements StreamAdapter {
+      handlers: AdapterHandlers | null = null;
+      connect(handlers: AdapterHandlers): void {
+        this.handlers = handlers;
+        handlers.onOpen();
+      }
+      disconnect(): void {}
+      subscribe(_req: SubscribeRequest): void {}
+      unsubscribe(_subId: string): void {}
+      publish(): void {}
+      request(): void {}
+      reply(requestId: string, ok: boolean): void {
+        this.handlers?.onReply?.({ requestId, ok, ...(ok ? { payload: 1 } : { error: { message: 'no' } }) });
+      }
+    }
+    const adapter = new RpcAdapter();
+    const client = new LivefluxClient({ adapter });
+    const sink = fakeSink();
+    attachLogger(client, { level: 'info', sink });
+    client.connect();
+
+    client.publish('orders', 'ping', 1);
+    expect(sink.calls.info.some((a) => String(a[1]).startsWith('publish "orders"/ping'))).toBe(true);
+
+    const p1 = client.request('orders', 'create', {});
+    expect(sink.calls.info.some((a) => String(a[1]).startsWith('request "orders"/create'))).toBe(true);
+    adapter.reply('req-1', true);
+    await expect(p1).resolves.toBe(1);
+    expect(sink.calls.info.some((a) => String(a[1]) === 'request req-1 resolved')).toBe(true);
+
+    const p2 = client.request('orders', 'create', {});
+    adapter.reply('req-2', false);
+    await expect(p2).rejects.toBeTruthy();
+    expect(sink.calls.warn.some((a) => String(a[1]) === 'request req-2 rejected')).toBe(true);
+  });
 });

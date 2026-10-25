@@ -44,12 +44,14 @@ function recorder(): AdapterHandlers & {
   closes: number;
   errors: unknown[];
   events: NormalizedEvent[];
+  replies: unknown[];
 } {
   const rec = {
     opens: 0,
     closes: 0,
     errors: [] as unknown[],
     events: [] as NormalizedEvent[],
+    replies: [] as unknown[],
     onOpen() {
       rec.opens += 1;
     },
@@ -61,6 +63,9 @@ function recorder(): AdapterHandlers & {
     },
     onEvent(ev: NormalizedEvent) {
       rec.events.push(ev);
+    },
+    onReply(reply: unknown) {
+      rec.replies.push(reply);
     },
   };
   return rec;
@@ -177,5 +182,62 @@ describe('@liveflux/sse', () => {
     } finally {
       (globalThis as { fetch?: unknown }).fetch = orig;
     }
+  });
+
+  describe('publish + request (bidirectional)', () => {
+    it('POSTs a fire-and-forget publish control frame', () => {
+      const h = harness();
+      h.latest().open();
+      h.adapter.publish?.({ channel: 'orders', event: 'create', payload: { sku: 'A1' }, meta: { r: 1 } });
+      expect(h.fetchFn.calls).toEqual([
+        {
+          url: 'https://x.test/stream',
+          body: { type: 'publish', channel: 'orders', event: 'create', payload: { sku: 'A1' }, meta: { r: 1 } },
+        },
+      ]);
+    });
+
+    it('carries an idempotencyKey on the publish control frame', () => {
+      const h = harness();
+      h.latest().open();
+      h.adapter.publish?.({ channel: 'orders', event: 'create', payload: 1, idempotencyKey: 'k-1' });
+      expect(h.fetchFn.calls[0]!.body).toEqual({
+        type: 'publish',
+        channel: 'orders',
+        event: 'create',
+        payload: 1,
+        idempotencyKey: 'k-1',
+      });
+    });
+
+    it('POSTs a request upstream and routes the reply from the event stream to onReply', () => {
+      const h = harness();
+      h.latest().open();
+      h.adapter.request?.({ requestId: 'rq_1', channel: 'orders', event: 'create', payload: { sku: 'A1' } });
+      expect(h.fetchFn.calls[0]!.body).toEqual({
+        type: 'request',
+        requestId: 'rq_1',
+        channel: 'orders',
+        event: 'create',
+        payload: { sku: 'A1' },
+      });
+
+      // the reply arrives back on the stream
+      h.latest().emit(JSON.stringify({ type: 'reply', requestId: 'rq_1', ok: true, payload: { id: 7 } }));
+      expect(h.rec.replies).toEqual([{ requestId: 'rq_1', ok: true, payload: { id: 7 }, error: undefined }]);
+      expect(h.rec.events).toEqual([]); // a reply is not an event
+    });
+
+    it('routes a rejected reply from the stream to onReply', () => {
+      const h = harness();
+      h.latest().open();
+      h.adapter.request?.({ requestId: 'rq_2', channel: 'orders', event: 'create', payload: {} });
+      h.latest().emit(
+        JSON.stringify({ type: 'reply', requestId: 'rq_2', ok: false, error: { message: 'nope' } }),
+      );
+      expect(h.rec.replies).toEqual([
+        { requestId: 'rq_2', ok: false, payload: undefined, error: { message: 'nope' } },
+      ]);
+    });
   });
 });

@@ -1,6 +1,9 @@
 import type {
   AdapterHandlers,
   NormalizedEvent,
+  PublishRequest,
+  ReplyFrame,
+  RequestFrame,
   StreamAdapter,
   SubscribeRequest,
 } from '@liveflux/core';
@@ -24,6 +27,15 @@ export interface GraphqlOperation {
   operationName?: string;
 }
 
+/** The command (publish / request) fields a `command` mapper turns into a GraphQL mutation. */
+export interface CommandInput {
+  channel: string;
+  event: string;
+  payload: unknown;
+  meta?: Record<string, unknown>;
+  idempotencyKey?: string;
+}
+
 export interface GraphqlWsOptions {
   /** WebSocket constructor. Default: `globalThis.WebSocket`. Inject for Node or tests. */
   WebSocket?: WebSocketCtor;
@@ -33,6 +45,13 @@ export interface GraphqlWsOptions {
    * documents, etc.
    */
   query?: (channel: string, params?: Record<string, unknown>) => GraphqlOperation;
+  /**
+   * Map a liveflux command (publish / request) to a GraphQL **mutation** operation. Both are sent as
+   * a `subscribe` message (the protocol carries every operation type that way — a mutation yields one
+   * `next` then `complete`). Default: the channel IS the mutation document and `{ event, payload,
+   * meta?, idempotencyKey? }` ARE the variables — override to point at a real mutation document.
+   */
+  command?: (req: CommandInput) => GraphqlOperation;
   /** Payload sent with `connection_init` (e.g. an auth token). A function is re-resolved per (re)connect. */
   connectionParams?:
     | Record<string, unknown>
@@ -66,6 +85,41 @@ function defaultDecode(payload: unknown, channel: string): NormalizedEvent | nul
   return { channel, event: 'next', payload: data };
 }
 
+function defaultCommand(req: CommandInput): GraphqlOperation {
+  return {
+    query: req.channel,
+    variables: {
+      event: req.event,
+      payload: req.payload,
+      ...(req.meta !== undefined ? { meta: req.meta } : {}),
+      ...(req.idempotencyKey !== undefined ? { idempotencyKey: req.idempotencyKey } : {}),
+    },
+  };
+}
+
+/** The `CommandInput` view of a publish/request (the mutation mapper never sees the requestId). */
+function commandInput(req: PublishRequest | RequestFrame): CommandInput {
+  return {
+    channel: req.channel,
+    event: req.event,
+    payload: req.payload,
+    ...(req.meta !== undefined ? { meta: req.meta } : {}),
+    ...(req.idempotencyKey !== undefined ? { idempotencyKey: req.idempotencyKey } : {}),
+  };
+}
+
+/**
+ * Map a GraphQL `ExecutionResult` (the mutation's single `next` payload) to a core `ReplyFrame`,
+ * correlated by the id we sent as the request id. Non-empty `errors` reject; otherwise `data`
+ * resolves.
+ */
+function resultToReply(requestId: string, result: unknown): ReplyFrame {
+  const r = (result ?? {}) as { data?: unknown; errors?: unknown };
+  const hasErrors = Array.isArray(r.errors) ? r.errors.length > 0 : r.errors != null;
+  if (hasErrors) return { requestId, ok: false, error: { data: r.errors } };
+  return { requestId, ok: true, payload: 'data' in r ? r.data : result };
+}
+
 /**
  * `graphql-transport-ws` adapter for `@liveflux/core`. Speaks the protocol directly over a WebSocket
  * (zero dependencies — it does NOT wrap a GraphQL client): `connection_init` → `connection_ack`
@@ -83,6 +137,7 @@ function defaultDecode(payload: unknown, channel: string): NormalizedEvent | nul
  */
 export function graphqlWs(url: string | (() => string), options: GraphqlWsOptions = {}): StreamAdapter {
   const query = options.query ?? defaultQuery;
+  const command = options.command ?? defaultCommand;
   const decode = options.decode ?? defaultDecode;
   const rawMax = options.maxMessageBytes ?? DEFAULT_MAX_MESSAGE;
   const messageLimit = rawMax > 0 ? rawMax : Infinity;
@@ -95,6 +150,10 @@ export function graphqlWs(url: string | (() => string), options: GraphqlWsOption
   const isReady = (): boolean => socket !== null && socket.readyState === OPEN && acked;
   // subId → { channel, payload } — the subscribe operation, replayed verbatim after each ack.
   const active = new Map<string, { channel: string; payload: GraphqlOperation }>();
+  // In-flight command operation ids → their kind. A `publish` id's result is discarded; a `request`
+  // id's single `next` becomes its reply. Not replayed on reconnect (commands are one-shot).
+  const commands = new Map<string, 'publish' | 'request'>();
+  let commandCounter = 0;
 
   const resolveUrl = (): string => (typeof url === 'function' ? url() : url);
 
@@ -127,6 +186,7 @@ export function graphqlWs(url: string | (() => string), options: GraphqlWsOption
       }
       if (socket) retire(socket);
       acked = false;
+      commands.clear(); // in-flight commands don't survive a reconnect (core rejects them on close)
       const s = new Ctor(resolveUrl(), PROTOCOL);
       socket = s;
 
@@ -159,17 +219,40 @@ export function graphqlWs(url: string | (() => string), options: GraphqlWsOption
           case 'next': {
             if (typeof msg.id !== 'string') break;
             const entry = active.get(msg.id);
-            if (!entry) break; // unknown / already-completed subscription
-            const event = decode(msg.payload, entry.channel);
-            if (event) handlers.onEvent(event);
+            if (entry) {
+              const event = decode(msg.payload, entry.channel);
+              if (event) handlers.onEvent(event);
+              break;
+            }
+            // Not a subscription → a command reply. A request's single `next` IS its reply; a
+            // publish's result is discarded (fire-and-forget). Unknown ids are ignored.
+            if (commands.get(msg.id) === 'request') {
+              handlers.onReply?.(resultToReply(msg.id, msg.payload));
+            }
             break;
           }
           case 'error': {
+            const id = typeof msg.id === 'string' ? msg.id : undefined;
+            if (id !== undefined) {
+              const cmd = commands.get(id);
+              if (cmd !== undefined) {
+                // A request that errored before yielding a result rejects via onReply; a publish's
+                // error is suppressed (fire-and-forget must not surface as a connection error).
+                if (cmd === 'request') {
+                  handlers.onReply?.({ requestId: id, ok: false, error: { data: msg.payload } });
+                }
+                commands.delete(id);
+                break;
+              }
+            }
             handlers.onError(msg.payload); // subscription-level GraphQL error
             break;
           }
           case 'complete': {
-            if (typeof msg.id === 'string') active.delete(msg.id); // server ended this subscription
+            if (typeof msg.id === 'string') {
+              active.delete(msg.id); // server ended this subscription
+              commands.delete(msg.id); // …or the command's terminal frame → stop tracking it
+            }
             break;
           }
         }
@@ -185,6 +268,7 @@ export function graphqlWs(url: string | (() => string), options: GraphqlWsOption
       const s = socket;
       socket = null;
       acked = false;
+      commands.clear();
       if (s) retire(s);
     },
 
@@ -203,6 +287,21 @@ export function graphqlWs(url: string | (() => string), options: GraphqlWsOption
       if (!active.has(subId)) return; // idempotent: unknown / already-removed → no frame
       active.delete(subId);
       if (isReady()) rawSend({ id: subId, type: 'complete' });
+    },
+
+    publish(req: PublishRequest): void {
+      // Fire-and-forget mutation under a fresh command id; its `next`/`complete` are consumed
+      // silently. The core only calls this while the connection is open (acked).
+      const id = `cmd-${(commandCounter += 1)}`;
+      commands.set(id, 'publish');
+      rawSend({ id, type: 'subscribe', payload: command(commandInput(req)) });
+    },
+
+    request(req: RequestFrame): void {
+      // RPC mutation keyed by the Liveflux requestId; the single `next` result routes back through
+      // onReply, and `complete` ends the tracking. The core owns correlation, timeout, cancellation.
+      commands.set(req.requestId, 'request');
+      rawSend({ id: req.requestId, type: 'subscribe', payload: command(commandInput(req)) });
     },
   });
 }

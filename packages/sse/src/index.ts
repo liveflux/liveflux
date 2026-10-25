@@ -2,6 +2,9 @@ import type {
   AdapterHandlers,
   Cursor,
   NormalizedEvent,
+  PublishRequest,
+  ReplyFrame,
+  RequestFrame,
   StreamAdapter,
   SubscribeRequest,
 } from '@liveflux/core';
@@ -24,12 +27,31 @@ type FetchLike = (
 
 /**
  * An upstream control frame. SSE is a one-way (server→client) transport, so subscribe / unsubscribe
- * / resume are sent over a separate channel — by default an HTTP POST alongside the event stream.
+ * / resume — and the commands publish / request — are sent over a separate channel: by default an
+ * HTTP POST alongside the event stream. A request's reply comes back *down the event stream* (see
+ * `decodeReply`), the standard SSE RPC shape (command upstream, result on the stream).
  */
 export type SseControlFrame =
   | { type: 'subscribe'; subId: string; channel: string; params?: Record<string, unknown> }
   | { type: 'unsubscribe'; subId: string }
-  | { type: 'resume'; subId: string; cursor: Cursor | null };
+  | { type: 'resume'; subId: string; cursor: Cursor | null }
+  | {
+      type: 'publish';
+      channel: string;
+      event: string;
+      payload: unknown;
+      meta?: Record<string, unknown>;
+      idempotencyKey?: string;
+    }
+  | {
+      type: 'request';
+      requestId: string;
+      channel: string;
+      event: string;
+      payload: unknown;
+      meta?: Record<string, unknown>;
+      idempotencyKey?: string;
+    };
 
 export interface SseOptions {
   /** Forwarded to `EventSource` — send credentials (cookies) with the stream request. */
@@ -53,6 +75,12 @@ export interface SseOptions {
    * taking the cursor from the payload's `cursor` or falling back to `lastEventId`.
    */
   decode?: (data: string, lastEventId: string) => NormalizedEvent | null;
+  /**
+   * Decode an inbound stream message into a `ReplyFrame` (the reply to a client `request`), or `null`
+   * if it isn't a reply. Tried before `decode`; a match is routed to `onReply` and stops there.
+   * Default: JSON-parse expecting `{ type: 'reply', requestId, ok, payload?, error? }`.
+   */
+  decodeReply?: (data: string) => ReplyFrame | null;
   /**
    * Security guard: drop inbound frames longer than this (approx. bytes, as string length) before
    * decoding — bounds memory/CPU from a malicious or buggy server. Set `0` to disable. Default: 1 MiB.
@@ -84,6 +112,24 @@ function defaultDecode(data: string, lastEventId: string): NormalizedEvent | nul
   return null;
 }
 
+function defaultDecodeReply(data: string): ReplyFrame | null {
+  let msg: unknown;
+  try {
+    msg = JSON.parse(data);
+  } catch {
+    return null;
+  }
+  if (typeof msg !== 'object' || msg === null) return null;
+  const m = msg as Record<string, unknown>;
+  if (m.type !== 'reply' || typeof m.requestId !== 'string' || typeof m.ok !== 'boolean') return null;
+  return {
+    requestId: m.requestId,
+    ok: m.ok,
+    payload: m.payload,
+    error: m.error as ReplyFrame['error'],
+  };
+}
+
 /**
  * Server-Sent Events adapter for `@liveflux/core`. Works with ANY backend that exposes an SSE
  * endpoint, in any language — the downstream event stream is a standard `EventSource`, and because
@@ -110,6 +156,7 @@ function defaultDecode(data: string, lastEventId: string): NormalizedEvent | nul
 export function sse(url: string | (() => string), options: SseOptions = {}): StreamAdapter {
   const encode = options.encode ?? JSON.stringify;
   const decode = options.decode ?? defaultDecode;
+  const decodeReply = options.decodeReply ?? defaultDecodeReply;
   const rawMax = options.maxMessageBytes ?? DEFAULT_MAX_MESSAGE;
   const messageLimit = rawMax > 0 ? rawMax : Infinity; // <= 0 disables the cap
   const Ctor =
@@ -186,6 +233,13 @@ export function sse(url: string | (() => string), options: SseOptions = {}): Str
         const raw = ev.data;
         if (typeof raw !== 'string') return; // SSE data is always text
         if (raw.length > messageLimit) return; // DoS guard before decoding
+        // A reply to a client `request` is routed to onReply and stops there; anything else is an
+        // event-stream frame.
+        const reply = decodeReply(raw);
+        if (reply) {
+          h.onReply?.(reply);
+          return;
+        }
         const event = decode(raw, ev.lastEventId ?? '');
         if (event) h.onEvent(event);
       };
@@ -228,6 +282,32 @@ export function sse(url: string | (() => string), options: SseOptions = {}): Str
       // The control channel is independent of the event stream, so a resume can be sent even while
       // the stream is mid-reconnect.
       sendControl({ type: 'resume', subId, cursor });
+    },
+
+    publish(req: PublishRequest): void {
+      // Commands ride the upstream control channel (SSE can't send on the event stream). Fire-and-forget.
+      sendControl({
+        type: 'publish',
+        channel: req.channel,
+        event: req.event,
+        payload: req.payload,
+        ...(req.meta !== undefined ? { meta: req.meta } : {}),
+        ...(req.idempotencyKey !== undefined ? { idempotencyKey: req.idempotencyKey } : {}),
+      });
+    },
+
+    request(req: RequestFrame): void {
+      // The request goes upstream over the control channel; its reply arrives back on the event
+      // stream, decoded by `decodeReply` and routed to onReply. The core owns correlation + timeout.
+      sendControl({
+        type: 'request',
+        requestId: req.requestId,
+        channel: req.channel,
+        event: req.event,
+        payload: req.payload,
+        ...(req.meta !== undefined ? { meta: req.meta } : {}),
+        ...(req.idempotencyKey !== undefined ? { idempotencyKey: req.idempotencyKey } : {}),
+      });
     },
   });
 }

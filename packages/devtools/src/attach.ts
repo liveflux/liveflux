@@ -90,6 +90,42 @@ export function attachDevtools(
         bytes: approxBytes(event.payload),
         at: Date.now(),
       }),
+    onPublish: (command) =>
+      bus.emit({
+        t: 'publish:out',
+        clientId,
+        channel: command.channel,
+        event: command.event,
+        payload: redactValue(command.payload, redactKeys),
+        bytes: approxBytes(command.payload),
+        ...(command.idempotencyKey !== undefined ? { idempotencyKey: command.idempotencyKey } : {}),
+        queued: command.queued,
+        at: Date.now(),
+      }),
+    onRequest: (request) =>
+      bus.emit({
+        t: 'request:out',
+        clientId,
+        requestId: request.requestId,
+        channel: request.channel,
+        event: request.event,
+        payload: redactValue(request.payload, redactKeys),
+        bytes: approxBytes(request.payload),
+        ...(request.idempotencyKey !== undefined ? { idempotencyKey: request.idempotencyKey } : {}),
+        queued: request.queued,
+        at: Date.now(),
+      }),
+    onRequestSettle: (settle) =>
+      bus.emit({
+        t: 'request:settle',
+        clientId,
+        requestId: settle.requestId,
+        outcome: settle.outcome,
+        ...(settle.outcome === 'resolved'
+          ? { payload: redactValue(settle.payload, redactKeys) }
+          : { error: describeError(settle.error) }),
+        at: Date.now(),
+      }),
   };
 
   const detachObserver = client.observe(observer);

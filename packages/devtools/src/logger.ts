@@ -60,6 +60,14 @@ export function attachLogger(
     observer.onSubscriptionAdd = (sub) =>
       sink.info(prefix, `subscribe "${sub.channel}" (${sub.strategy})`);
     observer.onSubscriptionRemove = (id) => sink.info(prefix, `unsubscribe ${id}`);
+    observer.onPublish = (c) =>
+      sink.info(prefix, `publish "${c.channel}"/${c.event}${c.queued ? ' (queued)' : ''}`);
+    observer.onRequest = (r) =>
+      sink.info(prefix, `request "${r.channel}"/${r.event} (${r.requestId})${r.queued ? ' (queued)' : ''}`);
+    observer.onRequestSettle = (s) => {
+      if (s.outcome === 'resolved') sink.info(prefix, `request ${s.requestId} resolved`);
+      else sink.warn(prefix, `request ${s.requestId} rejected`, s.error);
+    };
   }
 
   if (threshold >= ORDER.debug) {

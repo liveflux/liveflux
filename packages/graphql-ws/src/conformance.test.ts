@@ -1,4 +1,10 @@
-import type { NormalizedEvent, SubscribeRequest } from '@liveflux/core';
+import type {
+  NormalizedEvent,
+  PublishRequest,
+  ReplyFrame,
+  RequestFrame,
+  SubscribeRequest,
+} from '@liveflux/core';
 import { type AdapterHarness, runAdapterConformance } from '@liveflux/adapter-tests';
 import { graphqlWs, type GraphqlWsOptions } from './index';
 
@@ -6,6 +12,31 @@ interface SubscribeFrame {
   id: string;
   type: 'subscribe';
   payload: { query: string; variables?: Record<string, unknown>; operationName?: string };
+}
+
+/**
+ * A command (publish / request) rides the same `subscribe` message as a subscription; the default
+ * `command` mapper marks it by putting `event` in the variables (the mutation's args). Publishes use
+ * an adapter-minted `cmd-*` id; requests use the Liveflux requestId.
+ */
+function isCommandFrame(m: SubscribeFrame): boolean {
+  return m.type === 'subscribe' && m.payload.variables !== undefined && 'event' in m.payload.variables;
+}
+
+/** Decode a command frame's `{ query, variables }` back to its transport-neutral command fields. */
+function decodeCommand(m: SubscribeFrame): {
+  channel: string;
+  event: string;
+  payload: unknown;
+  meta?: Record<string, unknown>;
+} {
+  const v = m.payload.variables as { event: string; payload: unknown; meta?: Record<string, unknown> };
+  return {
+    channel: m.payload.query,
+    event: v.event,
+    payload: v.payload,
+    ...(v.meta !== undefined ? { meta: v.meta } : {}),
+  };
 }
 
 /**
@@ -66,8 +97,12 @@ runAdapterConformance({
       decode: (payload) => payload as NormalizedEvent,
     });
     const latest = () => instances[instances.length - 1]!;
-    const allSubscribes = (): SubscribeFrame[] =>
+    const allSubscribeMessages = (): SubscribeFrame[] =>
       instances.flatMap((s) => s.sent).filter((m): m is SubscribeFrame => (m as { type?: string }).type === 'subscribe');
+    // Real subscriptions only — commands (publish / request) share the `subscribe` message but are
+    // filtered out so they never masquerade as subscriptions.
+    const allSubscribes = (): SubscribeFrame[] => allSubscribeMessages().filter((m) => !isCommandFrame(m));
+    const allCommands = (): SubscribeFrame[] => allSubscribeMessages().filter(isCommandFrame);
 
     return {
       adapter,
@@ -90,6 +125,23 @@ runAdapterConformance({
           .flatMap((s) => s.sent)
           .filter((m): m is { id: string; type: 'complete' } => (m as { type?: string }).type === 'complete')
           .map((m) => m.id),
+      sentPublishes: (): PublishRequest[] =>
+        allCommands()
+          .filter((m) => m.id.startsWith('cmd-'))
+          .map(decodeCommand),
+      sentRequests: (): RequestFrame[] =>
+        allCommands()
+          .filter((m) => !m.id.startsWith('cmd-'))
+          .map((m) => ({ requestId: m.id, ...decodeCommand(m) })),
+      // Play the server: a mutation's single `next` result IS the reply, then `complete` ends it.
+      deliverReply: (reply: ReplyFrame) => {
+        latest().serverSend({
+          id: reply.requestId,
+          type: 'next',
+          payload: reply.ok ? { data: reply.payload } : { errors: reply.error },
+        });
+        latest().serverSend({ id: reply.requestId, type: 'complete' });
+      },
       // No resume capability (graphql-transport-ws has none) and no app-level keepalive frame
       // (ping is server-initiated, answered with pong) — those optional scenarios are skipped.
     };

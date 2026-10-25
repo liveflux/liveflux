@@ -11,7 +11,13 @@
 const DOCS_BASE = 'https://liveflux.bpdm.dev/docs/errors';
 
 /** Stable, machine-readable discriminant. Guaranteed not to change across releases. */
-export type LivefluxErrorCode = 'CONNECTION_FAILED' | 'ADAPTER_CONTRACT' | 'SCHEMA_VALIDATION';
+export type LivefluxErrorCode =
+  | 'CONNECTION_FAILED'
+  | 'ADAPTER_CONTRACT'
+  | 'SCHEMA_VALIDATION'
+  | 'REQUEST_TIMEOUT'
+  | 'REQUEST_FAILED'
+  | 'BACKPRESSURE';
 
 /** Options common to every Liveflux error. */
 export interface LivefluxErrorOptions {
@@ -87,5 +93,40 @@ export class SchemaValidationError extends LivefluxError {
     super('SCHEMA_VALIDATION', message, { cause: details.cause });
     this.channel = details.channel;
     this.path = details.path;
+  }
+}
+
+/** A `request` (client→server RPC) got no reply within its timeout. */
+export class TimeoutError extends LivefluxError {
+  constructor(message: string, options?: LivefluxErrorOptions) {
+    super('REQUEST_TIMEOUT', message, options);
+  }
+}
+
+/** Details of a server-side rejection carried on a reply frame. */
+export interface RequestErrorDetails extends LivefluxErrorOptions {
+  /** Application error code chosen by the server, if any. */
+  serverCode?: string;
+  /** Arbitrary structured error data from the server, if any. */
+  data?: unknown;
+}
+
+/** A `request` was refused because too many requests are already in flight (the concurrency cap). */
+export class BackpressureError extends LivefluxError {
+  constructor(message: string, options?: LivefluxErrorOptions) {
+    super('BACKPRESSURE', message, options);
+  }
+}
+
+/** A `request` (client→server RPC) was rejected by the server (a `{ ok: false }` reply). */
+export class RequestError extends LivefluxError {
+  /** Application error code chosen by the server, if any. */
+  readonly serverCode?: string;
+  /** Arbitrary structured error data from the server, if any. */
+  readonly data?: unknown;
+  constructor(message: string, details?: RequestErrorDetails) {
+    super('REQUEST_FAILED', message, { cause: details?.cause });
+    this.serverCode = details?.serverCode;
+    this.data = details?.data;
   }
 }
